@@ -6,8 +6,12 @@ function App(): React.JSX.Element {
 
   useEffect(() => {
     // Проверяем есть ли сохранённый путь
-    window.vault.getSavedPath().then((path) => {
-      if (path) setVaultPath(path)
+    window.vault.getSavedPath().then(async (path) => {
+      if (path) {
+        setVaultPath(path)
+        const vaultFolder = await window.vault.loadFiles(path)
+        setFiles(vaultFolder.map((f) => f.relativePath))
+      }
     })
   }, [])
 
