@@ -15,6 +15,20 @@ const vaultAPI = {
     ipcRenderer.invoke('vault:loadFiles', vaultPath)
 }
 
+contextBridge.exposeInMainWorld('indexing', {
+  start: (vaultPath: string, files: unknown[]) =>
+    ipcRenderer.invoke('indexing:start', vaultPath, files),
+  getProgress: () =>
+    ipcRenderer.invoke('indexing:getProgress'),
+  onProgress: (callback: (progress: unknown) => void) =>
+    ipcRenderer.on('indexing:progress', (_, progress) => callback(progress))
+})
+
+contextBridge.exposeInMainWorld('search', {
+  query: (query: string) =>
+    ipcRenderer.invoke('search:query', query)
+})
+
 // Use `contextBridge` APIs to expose Electron APIs to
 // renderer only if context isolation is enabled, otherwise
 // just add to the DOM global.

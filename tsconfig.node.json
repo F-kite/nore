@@ -8,6 +8,9 @@
     "src/renderer/**/*",
     "src/types/**/*",
   ],
+  "exclude": [
+    "src/preload/index.d.ts"
+  ],
   "compilerOptions": {
     "composite": true,
     "esModuleInterop": true,

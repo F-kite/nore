@@ -1,8 +1,13 @@
+import dotenv from 'dotenv'
+dotenv.config()
+console.log('VOYAGE_API_KEY:', process.env.VOYAGE_API_KEY ? 'loaded ✓' : 'NOT FOUND ✗')
 import { app, shell, BrowserWindow, ipcMain } from 'electron'
-import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
+import { indexVault, getProgress, searchNotes } from './indexer'
 import { selectVaultFolder, getSavedVaultPath, loadVaultFiles } from './vault'
+import { join } from 'path'
 import icon from '../../resources/icon.png?asset'
+import type { NoteFile } from '../types/indexer'
 
 function createWindow(): void {
   // Create the browser window.
@@ -61,6 +66,23 @@ app.whenReady().then(() => {
 
   ipcMain.handle('vault:loadFiles', async (_, vaultPath: string) => {
     return await loadVaultFiles(vaultPath)
+  })
+
+  //indexation
+
+  ipcMain.handle('indexing:start', async (_, vaultPath: string, files: NoteFile[]) => {
+    console.log('indexing:start called', vaultPath, files?.length, files?.[0])
+    await indexVault(vaultPath, files, (progress) => {
+      BrowserWindow.getAllWindows()[0]?.webContents.send('indexing:progress', progress)
+    })
+  })
+
+  ipcMain.handle('indexing:getProgress', () => {
+    return getProgress()
+  })
+
+  ipcMain.handle('search:query', async (_, query: string) => {
+    return await searchNotes(query)
   })
 
   createWindow()
