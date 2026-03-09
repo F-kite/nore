@@ -1,6 +1,7 @@
 import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
+import { selectVaultFolder, getSavedVaultPath, loadVaultFiles } from './vault'
 import icon from '../../resources/icon.png?asset'
 
 function createWindow(): void {
@@ -49,8 +50,18 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  // IPC test
-  ipcMain.on('ping', () => console.log('pong'))
+
+  ipcMain.handle('vault:select', async () => {
+    return await selectVaultFolder()
+  })
+
+  ipcMain.handle('vault:getSavedPath', () => {
+    return getSavedVaultPath()
+  })
+
+  ipcMain.handle('vault:loadFiles', async (_, vaultPath: string) => {
+    return await loadVaultFiles(vaultPath)
+  })
 
   createWindow()
 

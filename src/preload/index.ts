@@ -1,8 +1,19 @@
-import { contextBridge } from 'electron'
+import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
+import type { VaultFile } from '../types/vault'
 
-// Custom APIs for renderer
-const api = {}
+
+// Vault API — мост между renderer и main
+const vaultAPI = {
+  selectFolder: (): Promise<string | null> =>
+    ipcRenderer.invoke('vault:select'),
+
+  getSavedPath: (): Promise<string | null> =>
+    ipcRenderer.invoke('vault:getSavedPath'),
+
+  loadFiles: (vaultPath: string): Promise<VaultFile[]> =>
+    ipcRenderer.invoke('vault:loadFiles', vaultPath)
+}
 
 // Use `contextBridge` APIs to expose Electron APIs to
 // renderer only if context isolation is enabled, otherwise
@@ -10,7 +21,7 @@ const api = {}
 if (process.contextIsolated) {
   try {
     contextBridge.exposeInMainWorld('electron', electronAPI)
-    contextBridge.exposeInMainWorld('api', api)
+    contextBridge.exposeInMainWorld('vault', vaultAPI)
   } catch (error) {
     console.error(error)
   }
@@ -18,5 +29,5 @@ if (process.contextIsolated) {
   // @ts-ignore (define in dts)
   window.electron = electronAPI
   // @ts-ignore (define in dts)
-  window.api = api
+  window.vault = vaultAPI
 }

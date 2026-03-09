@@ -1,34 +1,38 @@
-import Versions from './components/Versions'
-import electronLogo from './assets/electron.svg'
+import { useState, useEffect } from 'react'
 
 function App(): React.JSX.Element {
-  const ipcHandle = (): void => window.electron.ipcRenderer.send('ping')
+  const [vaultPath, setVaultPath] = useState<string | null>(null)
+  const [files, setFiles] = useState<string[]>([])
+
+  useEffect(() => {
+    // Проверяем есть ли сохранённый путь
+    window.vault.getSavedPath().then((path) => {
+      if (path) setVaultPath(path)
+    })
+  }, [])
+
+  const handleSelectVault = async (): Promise<void> => {
+    const path = await window.vault.selectFolder()
+    if (path) {
+      setVaultPath(path)
+      const vaultFiles = await window.vault.loadFiles(path)
+      setFiles(vaultFiles.map((f) => f.relativePath))
+    }
+  }
 
   return (
-    <>
-      <img alt="logo" className="logo" src={electronLogo} />
-      <div className="creator">Powered by electron-vite</div>
-      <div className="text">
-        Build an Electron app with <span className="react">React</span>
-        &nbsp;and <span className="ts">TypeScript</span>
-      </div>
-      <p className="tip">
-        Please try pressing <code>F12</code> to open the devTool
-      </p>
-      <div className="actions">
-        <div className="action">
-          <a href="https://electron-vite.org/" target="_blank" rel="noreferrer">
-            Documentation
-          </a>
-        </div>
-        <div className="action">
-          <a target="_blank" rel="noreferrer" onClick={ipcHandle}>
-            Send IPC
-          </a>
-        </div>
-      </div>
-      <Versions></Versions>
-    </>
+    <div style={{ padding: 20 }}>
+      <h2>Nore — IPC Test</h2>
+      <button onClick={handleSelectVault}>Select Vault Folder</button>
+      {vaultPath && <p>Vault: {vaultPath}</p>}
+      {files.length > 0 && (
+        <ul>
+          {files.map((f) => (
+            <li key={f}>{f}</li>
+          ))}
+        </ul>
+      )}
+    </div>
   )
 }
 
