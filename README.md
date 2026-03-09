@@ -103,9 +103,9 @@ Nore follows an **open-core model** — the core is free and open-source forever
 ## Roadmap
 
 ### v0.1.0 — Current
-- [x] Connect local Obsidian vault
-- [x] Background indexing with progress indicator
-- [x] Ask mode — semantic chat with your vault
+- [ ] Connect local Obsidian vault
+- [ ] Background indexing with progress indicator
+- [ ] Ask mode — semantic chat with your vault
 
 ### v0.2.0 — Planned
 - [ ] Write mode — proactive sidebar *(Pro)*
