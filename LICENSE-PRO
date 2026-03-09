@@ -1,0 +1,50 @@
+Nore Pro — Proprietary License
+
+Copyright (c) 2026 F-kite. All rights reserved.
+
+---
+
+## Pro Features
+
+This license applies to the following proprietary features of Nore:
+
+- Write mode (proactive sidebar)
+- Web search in context
+- Timeline — evolution of thinking view
+- Licensing and subscription system
+
+---
+
+## Terms
+
+1. **No redistribution.** You may not copy, distribute, sublicense, or resell
+   the Pro features of this software, in whole or in part, without prior
+   written permission from the author.
+
+2. **No modification.** You may not modify, reverse-engineer, decompile,
+   or disassemble the Pro features of this software.
+
+3. **Personal use only.** A valid Pro subscription grants you a
+   non-exclusive, non-transferable right to use the Pro features
+   on your own devices for personal or commercial purposes.
+
+4. **Subscription required.** Access to Pro features requires an active
+   paid subscription. Attempting to bypass, disable, or circumvent
+   the licensing system is a violation of these terms and applicable law.
+
+5. **Termination.** This license is automatically terminated if you violate
+   any of these terms. Upon termination, you must cease all use of the
+   Pro features.
+
+---
+
+## Open-Source Core
+
+The open-source core of Nore (vault connection, indexing, basic Ask mode)
+is separately licensed under the MIT License. See LICENSE.
+
+---
+
+## Contact
+
+For licensing inquiries: ilichevv.work@gmail.com
