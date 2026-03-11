@@ -1,6 +1,5 @@
 import dotenv from 'dotenv'
 dotenv.config()
-console.log('VOYAGE_API_KEY:', process.env.VOYAGE_API_KEY ? 'loaded ✓' : 'NOT FOUND ✗')
 import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { indexVault, getProgress, searchNotes } from './indexer'
@@ -12,16 +11,28 @@ import type { NoteFile } from '../types/indexer'
 function createWindow(): void {
   // Create the browser window.
   const mainWindow = new BrowserWindow({
-    width: 900,
-    height: 670,
+    width: 1280,
+    height: 800,
+    minWidth: 900,
+    minHeight: 600,
     show: false,
     autoHideMenuBar: true,
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false
-    }
+    },
+    frame: false,        // убирает стандартный titlebar
+    titleBarStyle: 'hidden', // на Mac — прячет titlebar, но оставляет светофор
+    titleBarOverlay: {    // на Windows — нативные кнопки поверх контента
+      color: '#111113',   // цвет фона (nore-surface)
+      symbolColor: '#8B8B96', // цвет иконок (nore-text-secondary)
+      height: 48,         // высота = высота нашего top bar
+    },
   })
+
+  // Открыть на весь экран
+  mainWindow.maximize()
 
   mainWindow.on('ready-to-show', () => {
     mainWindow.show()
