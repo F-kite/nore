@@ -16,7 +16,21 @@ export interface NoteRecord {
   content: string
   createdAt: number
   modifiedAt: number
+  _distance?: number
   vector: number[]
+}
+
+export type LLMProvider = 'openai' | 'anthropic' | 'ollama'
+
+export interface AppSettings {
+  accentColor: string
+  customAccentColor: string
+  fontSize: string
+  showLineNumbers: boolean
+  llmProvider: LLMProvider
+  llmModel: string
+  llmBaseUrl: string
+  shortcuts: Record<string, string>
 }
 
 declare global {
@@ -35,7 +49,21 @@ declare global {
     search: {
       query: (query: string) => Promise<NoteRecord[]>
     }
+    settings: {
+      get: () => Promise<AppSettings>
+      update: (updates: Partial<AppSettings>) => Promise<AppSettings>
+      getDefaultShortcuts: () => Promise<Record<string, string>>
+    }
+    apiKeys: {
+      save: (keyName: 'embeddings' | 'llm', value: string) => Promise<void>
+      getMasked: (keyName: 'embeddings' | 'llm') => Promise<string>
+      has: (keyName: 'embeddings' | 'llm') => Promise<boolean>
+      remove: (keyName: 'embeddings' | 'llm') => Promise<void>
+    }
+    platform: {
+      isMac: boolean
+    }
   }
 }
 
-export { }
+export {}

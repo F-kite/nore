@@ -1,102 +1,82 @@
 
-import { useState, useEffect, useRef } from "react"
-import { Search, FileText, ArrowRight } from "lucide-react"
+import { useState, useEffect, useRef, useCallback } from "react"
+import { Search, FileText, ArrowRight, Loader2 } from "lucide-react"
+import type { NoteRecord } from "../../../../types/index.d"
 
 interface SearchModalProps {
   open: boolean
   onClose: () => void
-  onSelectNote: (note: SearchResult) => void
+  onSelectNote: (note: NoteRecord) => void
 }
 
-interface SearchResult {
-  id: string
-  title: string
-  path: string
-  relevance: number
-  preview: string
+function distanceToRelevance(distance: number | undefined): number | null {
+  if (distance === undefined) return null
+  // LanceDB cosine distance: 0 = identical, 2 = opposite
+  return Math.round(Math.max(0, (1 - distance / 2) * 100))
 }
-
-const mockNotes: SearchResult[] = [
-  {
-    id: "1",
-    title: "2024-01-15 Deep Work Summary",
-    path: "productivity/deep-work-summary.md",
-    relevance: 95,
-    preview: "Cal Newport argues that deep work is becoming increasingly rare in our economy...",
-  },
-  {
-    id: "2",
-    title: "Zettelkasten Method Notes",
-    path: "methods/zettelkasten.md",
-    relevance: 88,
-    preview: "The Zettelkasten method emphasizes atomic notes and meaningful connections...",
-  },
-  {
-    id: "3",
-    title: "Weekly Review Template",
-    path: "templates/weekly-review.md",
-    relevance: 76,
-    preview: "Review what worked, what didn't, and plan for the upcoming week...",
-  },
-  {
-    id: "4",
-    title: "Spaced Repetition Research",
-    path: "learning/spaced-repetition.md",
-    relevance: 72,
-    preview: "The spacing effect demonstrates that learning is more effective when spread out...",
-  },
-  {
-    id: "5",
-    title: "Building a Second Brain",
-    path: "books/building-second-brain.md",
-    relevance: 68,
-    preview: "Tiago Forte's methodology for capturing and organizing digital information...",
-  },
-  {
-    id: "6",
-    title: "Time Blocking Experiments",
-    path: "productivity/time-blocking.md",
-    relevance: 65,
-    preview: "After three weeks of strict time blocking, I've observed significant changes...",
-  },
-]
 
 export function SearchModal({ open, onClose, onSelectNote }: SearchModalProps) {
   const [query, setQuery] = useState("")
+  const [results, setResults] = useState<NoteRecord[]>([])
+  const [loading, setLoading] = useState(false)
   const [selectedIndex, setSelectedIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const filteredNotes = query.trim()
-    ? mockNotes.filter(
-        (note) =>
-          note.title.toLowerCase().includes(query.toLowerCase()) ||
-          note.preview.toLowerCase().includes(query.toLowerCase())
-      )
-    : mockNotes
+  const runSearch = useCallback(async (q: string) => {
+    if (!q.trim()) {
+      setResults([])
+      return
+    }
+    setLoading(true)
+    try {
+      const res = await window.search.query(q.trim())
+      setResults(res)
+    } catch {
+      setResults([])
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    setSelectedIndex(0)
+
+    if (!query.trim()) {
+      setResults([])
+      setLoading(false)
+      return
+    }
+
+    setLoading(true)
+    debounceRef.current = setTimeout(() => runSearch(query), 400)
+
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+    }
+  }, [query, runSearch])
 
   useEffect(() => {
     if (open) {
       setQuery("")
+      setResults([])
       setSelectedIndex(0)
-      // Focus with a small delay to ensure modal is rendered
+      setLoading(false)
       setTimeout(() => inputRef.current?.focus(), 50)
     }
   }, [open])
 
-  useEffect(() => {
-    setSelectedIndex(0)
-  }, [query])
-
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "ArrowDown") {
       e.preventDefault()
-      setSelectedIndex((i) => Math.min(i + 1, filteredNotes.length - 1))
+      setSelectedIndex((i) => Math.min(i + 1, results.length - 1))
     } else if (e.key === "ArrowUp") {
       e.preventDefault()
       setSelectedIndex((i) => Math.max(i - 1, 0))
-    } else if (e.key === "Enter" && filteredNotes[selectedIndex]) {
+    } else if (e.key === "Enter" && results[selectedIndex]) {
       e.preventDefault()
-      onSelectNote(filteredNotes[selectedIndex])
+      onSelectNote(results[selectedIndex])
     } else if (e.key === "Escape") {
       e.preventDefault()
       onClose()
@@ -104,6 +84,9 @@ export function SearchModal({ open, onClose, onSelectNote }: SearchModalProps) {
   }
 
   if (!open) return null
+
+  const showEmpty = !loading && query.trim() && results.length === 0
+  const showPlaceholder = !loading && !query.trim()
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh]">
@@ -117,14 +100,18 @@ export function SearchModal({ open, onClose, onSelectNote }: SearchModalProps) {
       <div className="relative w-full max-w-xl overflow-hidden rounded-lg border border-nore-border bg-nore-surface shadow-2xl">
         {/* Search input */}
         <div className="flex items-center gap-3 border-b border-nore-border px-4 py-3">
-          <Search className="h-5 w-5 text-nore-text-tertiary" />
+          {loading ? (
+            <Loader2 className="h-5 w-5 animate-spin text-nore-text-tertiary" />
+          ) : (
+            <Search className="h-5 w-5 text-nore-text-tertiary" />
+          )}
           <input
             ref={inputRef}
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Search notes..."
+            placeholder="Search notes semantically..."
             className="flex-1 bg-transparent text-sm text-nore-text-primary placeholder:text-nore-text-tertiary focus:outline-none"
           />
           <kbd className="rounded border border-nore-border bg-nore-base px-1.5 py-0.5 text-xs text-nore-text-tertiary">
@@ -133,46 +120,63 @@ export function SearchModal({ open, onClose, onSelectNote }: SearchModalProps) {
         </div>
 
         {/* Results */}
-        <div className="max-h-[400px] overflow-y-auto scrollbar-thin">
-          {filteredNotes.length === 0 ? (
+        <div className="max-h-100 overflow-y-auto scrollbar-thin">
+          {showPlaceholder && (
             <div className="px-4 py-8 text-center text-sm text-nore-text-tertiary">
-              No notes found matching "{query}"
+              Type to search your vault semantically
             </div>
-          ) : (
+          )}
+
+          {showEmpty && (
+            <div className="px-4 py-8 text-center text-sm text-nore-text-tertiary">
+              No notes found for &ldquo;{query}&rdquo;
+            </div>
+          )}
+
+          {results.length > 0 && (
             <div className="py-2">
-              {filteredNotes.map((note, index) => (
-                <button
-                  key={note.id}
-                  onClick={() => onSelectNote(note)}
-                  onMouseEnter={() => setSelectedIndex(index)}
-                  className={`flex w-full items-start gap-3 px-4 py-3 text-left transition-colors ${
-                    selectedIndex === index
-                      ? "bg-nore-elevated"
-                      : "hover:bg-nore-base"
-                  }`}
-                >
-                  <FileText className="mt-0.5 h-4 w-4 flex-shrink-0 text-nore-text-tertiary" />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <p className="truncate text-sm font-medium text-nore-text-primary">
-                        {note.title}
+              {results.map((note, index) => {
+                const relevance = distanceToRelevance(note._distance)
+                const preview = note.content.replace(/^---[\s\S]*?---\n?/, "").trim().slice(0, 120)
+
+                return (
+                  <button
+                    key={note.id}
+                    onClick={() => onSelectNote(note)}
+                    onMouseEnter={() => setSelectedIndex(index)}
+                    className={`flex w-full items-start gap-3 px-4 py-3 text-left transition-colors ${
+                      selectedIndex === index
+                        ? "bg-nore-elevated"
+                        : "hover:bg-nore-base"
+                    }`}
+                  >
+                    <FileText className="mt-0.5 h-4 w-4 shrink-0 text-nore-text-tertiary" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <p className="truncate text-sm font-medium text-nore-text-primary">
+                          {note.title}
+                        </p>
+                        {relevance !== null && (
+                          <span className="shrink-0 rounded bg-nore-base px-1.5 py-0.5 text-xs text-nore-text-tertiary">
+                            {relevance}%
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-0.5 truncate font-mono text-xs text-nore-text-tertiary">
+                        {note.relativePath}
                       </p>
-                      <span className="flex-shrink-0 rounded bg-nore-base px-1.5 py-0.5 text-xs text-nore-text-tertiary">
-                        {note.relevance}%
-                      </span>
+                      {preview && (
+                        <p className="mt-1 line-clamp-1 text-xs text-nore-text-secondary">
+                          {preview}
+                        </p>
+                      )}
                     </div>
-                    <p className="mt-0.5 truncate font-mono text-xs text-nore-text-tertiary">
-                      {note.path}
-                    </p>
-                    <p className="mt-1 line-clamp-1 text-xs text-nore-text-secondary">
-                      {note.preview}
-                    </p>
-                  </div>
-                  {selectedIndex === index && (
-                    <ArrowRight className="mt-0.5 h-4 w-4 flex-shrink-0 text-[var(--nore-accent)]" />
-                  )}
-                </button>
-              ))}
+                    {selectedIndex === index && (
+                      <ArrowRight className="mt-0.5 h-4 w-4 shrink-0 text-(--nore-accent)" />
+                    )}
+                  </button>
+                )
+              })}
             </div>
           )}
         </div>

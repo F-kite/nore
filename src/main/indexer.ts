@@ -151,6 +151,7 @@ export async function searchNotes(
     content: String(r.content ?? ''),
     createdAt: Number(r.createdAt ?? 0),
     modifiedAt: Number(r.modifiedAt ?? 0),
+    _distance: typeof r._distance === 'number' ? r._distance : undefined,
     vector: []  // не передаём вектор в renderer — он большой и не нужен
   }))
 }
