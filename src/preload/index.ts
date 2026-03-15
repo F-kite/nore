@@ -39,6 +39,18 @@ const apiKeysAPI = {
   remove: (keyName: string) => ipcRenderer.invoke('apiKeys:save', keyName, '')
 }
 
+// LLM API (streaming via ipcRenderer events)
+let onLLMTokenCallback: ((data: { chatId: string; token: string }) => void) | null = null
+ipcRenderer.on('llm:token', (_, data) => onLLMTokenCallback?.(data))
+
+const llmAPI = {
+  chat: (params: { chatId: string; messages: { role: string; content: string }[]; contextNotes: string }) =>
+    ipcRenderer.invoke('llm:chat', params),
+  onToken: (callback: (data: { chatId: string; token: string }) => void) => {
+    onLLMTokenCallback = callback
+  }
+}
+
 // Platform info
 const platformAPI = {
   isMac: process.platform === 'darwin'
@@ -52,6 +64,7 @@ if (process.contextIsolated) {
     contextBridge.exposeInMainWorld('search', searchAPI)
     contextBridge.exposeInMainWorld('settings', settingsAPI)
     contextBridge.exposeInMainWorld('apiKeys', apiKeysAPI)
+    contextBridge.exposeInMainWorld('llm', llmAPI)
     contextBridge.exposeInMainWorld('platform', platformAPI)
   } catch (error) {
     console.error(error)
@@ -69,6 +82,8 @@ if (process.contextIsolated) {
   window.settings = settingsAPI
   // @ts-ignore
   window.apiKeys = apiKeysAPI
+  // @ts-ignore
+  window.llm = llmAPI
   // @ts-ignore
   window.platform = platformAPI
 }
