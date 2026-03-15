@@ -70,6 +70,11 @@ declare global {
       chat: (params: { chatId: string; messages: LLMChatMessage[]; contextNotes: string }) => Promise<void>
       onToken: (callback: (data: { chatId: string; token: string }) => void) => void
     }
+    windowControls: {
+      minimize: () => void
+      toggleMaximize: () => void
+      close: () => void
+    }
     platform: {
       isMac: boolean
     }

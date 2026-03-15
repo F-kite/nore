@@ -51,6 +51,13 @@ const llmAPI = {
   }
 }
 
+// Window controls (frameless window)
+const windowControlsAPI = {
+  minimize: () => ipcRenderer.send('window:minimize'),
+  toggleMaximize: () => ipcRenderer.send('window:toggleMaximize'),
+  close: () => ipcRenderer.send('window:close')
+}
+
 // Platform info
 const platformAPI = {
   isMac: process.platform === 'darwin'
@@ -65,6 +72,7 @@ if (process.contextIsolated) {
     contextBridge.exposeInMainWorld('settings', settingsAPI)
     contextBridge.exposeInMainWorld('apiKeys', apiKeysAPI)
     contextBridge.exposeInMainWorld('llm', llmAPI)
+    contextBridge.exposeInMainWorld('windowControls', windowControlsAPI)
     contextBridge.exposeInMainWorld('platform', platformAPI)
   } catch (error) {
     console.error(error)
@@ -84,6 +92,8 @@ if (process.contextIsolated) {
   window.apiKeys = apiKeysAPI
   // @ts-ignore
   window.llm = llmAPI
+  // @ts-ignore
+  window.windowControls = windowControlsAPI
   // @ts-ignore
   window.platform = platformAPI
 }

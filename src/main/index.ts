@@ -20,14 +20,23 @@ import type { NoteFile } from '../types/indexer'
 
 console.log('[DEBUG] MISTRAL_API_KEY:', process.env.MISTRAL_API_KEY ? 'loaded' : 'NOT FOUND')
 
+let mainWindow: BrowserWindow | null = null
+
 function createWindow(): void {
-  const mainWindow = new BrowserWindow({
+  const isMac = process.platform === 'darwin'
+
+  mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
     minWidth: 900,
     minHeight: 600,
     show: false,
     autoHideMenuBar: true,
+    // Custom title bar
+    ...(isMac
+      ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 12, y: 18 } }
+      : { frame: false }
+    ),
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -38,7 +47,7 @@ function createWindow(): void {
   mainWindow.maximize()
 
   mainWindow.on('ready-to-show', () => {
-    mainWindow.show()
+    mainWindow!.show()
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -101,6 +110,14 @@ app.whenReady().then(() => {
   ipcMain.handle('search:query', async (_, query: string) => {
     return await searchNotes(query)
   })
+
+  // Window controls IPC (frameless window)
+  ipcMain.on('window:minimize', () => mainWindow?.minimize())
+  ipcMain.on('window:toggleMaximize', () => {
+    if (mainWindow?.isMaximized()) mainWindow.unmaximize()
+    else mainWindow?.maximize()
+  })
+  ipcMain.on('window:close', () => mainWindow?.close())
 
   // LLM IPC (streaming)
   ipcMain.handle('llm:chat', async (event, params: {
