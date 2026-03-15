@@ -1,6 +1,6 @@
 
 import { useState, useEffect } from "react"
-import { RefreshCw, ExternalLink, Plus, AlertCircle, Bold, Italic, Heading, LinkIcon, Code, FileText } from "lucide-react"
+import { RefreshCw, ExternalLink, Plus, Bold, Italic, Heading, LinkIcon, Code, FileText } from "lucide-react"
 import {
   Tooltip,
   TooltipContent,
@@ -10,6 +10,7 @@ import {
 
 interface WriteScreenProps {
   showLineNumbers: boolean
+  initialNote?: { title: string; content: string }
 }
 
 interface RelatedNote {
@@ -85,9 +86,16 @@ const toolbarButtons = [
   { icon: Code, label: "Code", shortcut: "Cmd+`" },
 ]
 
-export function WriteScreen({ showLineNumbers }: WriteScreenProps) {
+export function WriteScreen({ showLineNumbers, initialNote }: WriteScreenProps) {
   const [content, setContent] = useState(initialContent)
   const [fileName, setFileName] = useState("Productivity Systems Review.md")
+
+  useEffect(() => {
+    if (initialNote) {
+      setContent(initialNote.content)
+      setFileName(initialNote.title.endsWith(".md") ? initialNote.title : `${initialNote.title}.md`)
+    }
+  }, [initialNote])
   const [panelWidth, setPanelWidth] = useState(40) // percentage
   const [isResizing, setIsResizing] = useState(false)
   const [isLoading, setIsLoading] = useState(false)

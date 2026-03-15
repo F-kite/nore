@@ -8,6 +8,11 @@ export interface IndexingProgress {
   error?: string
 }
 
+export interface LLMChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
+
 export interface NoteRecord {
   id: string
   filePath: string
@@ -20,7 +25,7 @@ export interface NoteRecord {
   vector: number[]
 }
 
-export type LLMProvider = 'openai' | 'anthropic' | 'ollama'
+export type LLMProvider = 'openai' | 'anthropic' | 'ollama' | 'lmstudio'
 
 export interface AppSettings {
   accentColor: string
@@ -29,6 +34,7 @@ export interface AppSettings {
   showLineNumbers: boolean
   llmProvider: LLMProvider
   llmModel: string
+  llmDisplayName: string
   llmBaseUrl: string
   shortcuts: Record<string, string>
 }
@@ -59,6 +65,10 @@ declare global {
       getMasked: (keyName: 'embeddings' | 'llm') => Promise<string>
       has: (keyName: 'embeddings' | 'llm') => Promise<boolean>
       remove: (keyName: 'embeddings' | 'llm') => Promise<void>
+    }
+    llm: {
+      chat: (params: { chatId: string; messages: LLMChatMessage[]; contextNotes: string }) => Promise<void>
+      onToken: (callback: (data: { chatId: string; token: string }) => void) => void
     }
     platform: {
       isMac: boolean

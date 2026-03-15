@@ -1,12 +1,14 @@
 
 import { useState, useEffect, useRef, useCallback } from "react"
-import { Search, FileText, ArrowRight, Loader2 } from "lucide-react"
+import { Search, FileText, ArrowRight, Loader2, MessageCircle, PenLine } from "lucide-react"
 import type { NoteRecord } from "../../../../types/index.d"
+
+export type OpenMode = "chat" | "write"
 
 interface SearchModalProps {
   open: boolean
   onClose: () => void
-  onSelectNote: (note: NoteRecord) => void
+  onSelectNote: (note: NoteRecord, mode: OpenMode) => void
 }
 
 function distanceToRelevance(distance: number | undefined): number | null {
@@ -20,7 +22,10 @@ export function SearchModal({ open, onClose, onSelectNote }: SearchModalProps) {
   const [results, setResults] = useState<NoteRecord[]>([])
   const [loading, setLoading] = useState(false)
   const [selectedIndex, setSelectedIndex] = useState(0)
+  const [openMode, setOpenMode] = useState<OpenMode>("chat")
   const inputRef = useRef<HTMLInputElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
+  const itemRefs = useRef<(HTMLButtonElement | null)[]>([])
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const runSearch = useCallback(async (q: string) => {
@@ -57,6 +62,11 @@ export function SearchModal({ open, onClose, onSelectNote }: SearchModalProps) {
     }
   }, [query, runSearch])
 
+  // Auto-scroll selected item into view
+  useEffect(() => {
+    itemRefs.current[selectedIndex]?.scrollIntoView({ block: "nearest" })
+  }, [selectedIndex])
+
   useEffect(() => {
     if (open) {
       setQuery("")
@@ -74,9 +84,12 @@ export function SearchModal({ open, onClose, onSelectNote }: SearchModalProps) {
     } else if (e.key === "ArrowUp") {
       e.preventDefault()
       setSelectedIndex((i) => Math.max(i - 1, 0))
+    } else if (e.key === "Tab") {
+      e.preventDefault()
+      setOpenMode((m) => (m === "chat" ? "write" : "chat"))
     } else if (e.key === "Enter" && results[selectedIndex]) {
       e.preventDefault()
-      onSelectNote(results[selectedIndex])
+      onSelectNote(results[selectedIndex], openMode)
     } else if (e.key === "Escape") {
       e.preventDefault()
       onClose()
@@ -120,7 +133,7 @@ export function SearchModal({ open, onClose, onSelectNote }: SearchModalProps) {
         </div>
 
         {/* Results */}
-        <div className="max-h-100 overflow-y-auto scrollbar-thin">
+        <div ref={listRef} className="max-h-100 overflow-y-auto scrollbar-thin">
           {showPlaceholder && (
             <div className="px-4 py-8 text-center text-sm text-nore-text-tertiary">
               Type to search your vault semantically
@@ -138,16 +151,16 @@ export function SearchModal({ open, onClose, onSelectNote }: SearchModalProps) {
               {results.map((note, index) => {
                 const relevance = distanceToRelevance(note._distance)
                 const preview = note.content.replace(/^---[\s\S]*?---\n?/, "").trim().slice(0, 120)
+                const isSelected = selectedIndex === index
 
                 return (
                   <button
                     key={note.id}
-                    onClick={() => onSelectNote(note)}
+                    ref={(el) => { itemRefs.current[index] = el }}
+                    onClick={() => onSelectNote(note, openMode)}
                     onMouseEnter={() => setSelectedIndex(index)}
                     className={`flex w-full items-start gap-3 px-4 py-3 text-left transition-colors ${
-                      selectedIndex === index
-                        ? "bg-nore-elevated"
-                        : "hover:bg-nore-base"
+                      isSelected ? "bg-nore-elevated" : "hover:bg-nore-base"
                     }`}
                   >
                     <FileText className="mt-0.5 h-4 w-4 shrink-0 text-nore-text-tertiary" />
@@ -171,8 +184,15 @@ export function SearchModal({ open, onClose, onSelectNote }: SearchModalProps) {
                         </p>
                       )}
                     </div>
-                    {selectedIndex === index && (
-                      <ArrowRight className="mt-0.5 h-4 w-4 shrink-0 text-(--nore-accent)" />
+                    {isSelected && (
+                      <div className="mt-0.5 flex shrink-0 items-center gap-1.5 text-(--nore-accent)">
+                        {openMode === "chat" ? (
+                          <MessageCircle className="h-4 w-4" />
+                        ) : (
+                          <PenLine className="h-4 w-4" />
+                        )}
+                        <ArrowRight className="h-4 w-4" />
+                      </div>
                     )}
                   </button>
                 )
@@ -186,11 +206,39 @@ export function SearchModal({ open, onClose, onSelectNote }: SearchModalProps) {
           <span className="flex items-center gap-1">
             <kbd className="rounded border border-nore-border bg-nore-base px-1 py-0.5">↑</kbd>
             <kbd className="rounded border border-nore-border bg-nore-base px-1 py-0.5">↓</kbd>
-            to navigate
+            navigate
           </span>
           <span className="flex items-center gap-1">
+            <kbd className="rounded border border-nore-border bg-nore-base px-1 py-0.5">Tab</kbd>
+            open in:
+          </span>
+          <span className="flex items-center gap-1 rounded border border-nore-border">
+            <button
+              onClick={() => setOpenMode("chat")}
+              className={`flex items-center gap-1 rounded-l px-2 py-0.5 transition-colors ${
+                openMode === "chat"
+                  ? "bg-(--nore-accent) text-white"
+                  : "hover:text-nore-text-primary"
+              }`}
+            >
+              <MessageCircle className="h-3 w-3" />
+              Chat
+            </button>
+            <button
+              onClick={() => setOpenMode("write")}
+              className={`flex items-center gap-1 rounded-r px-2 py-0.5 transition-colors ${
+                openMode === "write"
+                  ? "bg-(--nore-accent) text-white"
+                  : "hover:text-nore-text-primary"
+              }`}
+            >
+              <PenLine className="h-3 w-3" />
+              Write
+            </button>
+          </span>
+          <span className="ml-auto flex items-center gap-1">
             <kbd className="rounded border border-nore-border bg-nore-base px-1.5 py-0.5">Enter</kbd>
-            to select
+            open
           </span>
         </div>
       </div>

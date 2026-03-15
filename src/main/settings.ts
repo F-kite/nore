@@ -3,7 +3,7 @@ import Store from 'electron-store'
 
 // --- Types ---
 
-export type LLMProvider = 'openai' | 'anthropic' | 'ollama'
+export type LLMProvider = 'openai' | 'anthropic' | 'ollama' | 'lmstudio'
 
 export interface LLMProviderConfig {
   provider: LLMProvider
@@ -22,7 +22,8 @@ export interface AppSettings {
   // LLM
   llmProvider: LLMProvider
   llmModel: string
-  llmBaseUrl: string // for Ollama
+  llmDisplayName: string
+  llmBaseUrl: string // for local providers (Ollama, LM Studio)
 
   // Keyboard shortcuts (action -> shortcut string)
   shortcuts: Record<string, string>
@@ -44,6 +45,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   showLineNumbers: true,
   llmProvider: 'openai',
   llmModel: 'gpt-4o-mini',
+  llmDisplayName: '',
   llmBaseUrl: 'http://localhost:11434',
   shortcuts: DEFAULT_SHORTCUTS
 }

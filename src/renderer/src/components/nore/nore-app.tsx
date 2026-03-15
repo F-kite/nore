@@ -4,7 +4,7 @@ import { ChatScreen } from './screens/chat-screen'
 import { WriteScreen } from './screens/write-screen'
 import { SettingsScreen } from './screens/settings-screen'
 import { WelcomeScreen } from './screens/welcome-screen'
-import { SearchModal } from './search-modal'
+import { SearchModal, type OpenMode } from './search-modal'
 import {
   Tooltip,
   TooltipContent,
@@ -51,6 +51,7 @@ export interface NoreState {
   llmApiKey: string
   showLineNumbers: boolean
   indexStatus: 'up-to-date' | 'indexing' | 'error'
+  selectedNoteForWrite: { title: string; content: string } | null
 }
 
 export function NoreApp() {
@@ -72,7 +73,8 @@ export function NoreApp() {
     voyageApiKey: '',
     llmApiKey: '',
     showLineNumbers: true,
-    indexStatus: 'up-to-date'
+    indexStatus: 'up-to-date',
+    selectedNoteForWrite: null
   })
 
   // On mount: check if vault is already configured
@@ -365,7 +367,10 @@ export function NoreApp() {
             className={`h-full transition-opacity duration-150 ${state.screen === 'write' ? 'opacity-100' : 'hidden opacity-0'
               }`}
           >
-            <WriteScreen showLineNumbers={state.showLineNumbers} />
+            <WriteScreen
+              showLineNumbers={state.showLineNumbers}
+              initialNote={state.selectedNoteForWrite ?? undefined}
+            />
           </div>
           <div
             className={`h-full transition-opacity duration-150 ${state.screen === 'settings' ? 'opacity-100' : 'hidden opacity-0'
@@ -378,8 +383,15 @@ export function NoreApp() {
         <SearchModal
           open={state.searchOpen}
           onClose={closeSearch}
-          onSelectNote={() => {
+          onSelectNote={(note, mode: OpenMode) => {
             closeSearch()
+            setState((s) => ({
+              ...s,
+              screen: mode,
+              selectedNoteForWrite: mode === 'write'
+                ? { title: note.title, content: note.content }
+                : s.selectedNoteForWrite
+            }))
           }}
         />
       </div>

@@ -14,6 +14,8 @@ import {
 import icon from '../../resources/icon.png?asset'
 import { getSettings, updateSettings, getDefaultShortcuts, saveApiKey, getMaskedApiKey, hasApiKey } from './settings'
 import { indexVault, getProgress, searchNotes } from './indexer'
+import { streamChat } from './llm'
+import type { LLMChatMessage } from './llm'
 import type { NoteFile } from '../types/indexer'
 
 console.log('[DEBUG] MISTRAL_API_KEY:', process.env.MISTRAL_API_KEY ? 'loaded' : 'NOT FOUND')
@@ -98,6 +100,20 @@ app.whenReady().then(() => {
   // Search IPC
   ipcMain.handle('search:query', async (_, query: string) => {
     return await searchNotes(query)
+  })
+
+  // LLM IPC (streaming)
+  ipcMain.handle('llm:chat', async (event, params: {
+    chatId: string
+    messages: LLMChatMessage[]
+    contextNotes: string
+  }) => {
+    await streamChat({
+      ...params,
+      onToken: (token) => {
+        event.sender.send('llm:token', { chatId: params.chatId, token })
+      }
+    })
   })
 
   // --- Settings ---
