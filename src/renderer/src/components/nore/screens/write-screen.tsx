@@ -1,12 +1,17 @@
 
-import { useState, useEffect } from "react"
-import { RefreshCw, ExternalLink, Plus, Bold, Italic, Heading, LinkIcon, Code, FileText } from "lucide-react"
+import { useState, useEffect, useCallback, useRef } from "react"
+import {
+  RefreshCw, ExternalLink, Bold, Italic, Heading, LinkIcon,
+  Code, FileText, ChevronDown, ChevronRight, Folder
+} from "lucide-react"
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from "@renderer/components/ui/tooltip"
+import type { NoteRecord } from "../../../../../types/index.d"
+import type { VaultFile } from "../../../../../types/vault"
 
 interface WriteScreenProps {
   showLineNumbers: boolean
@@ -15,47 +20,146 @@ interface WriteScreenProps {
 
 interface RelatedNote {
   title: string
-  score: number
+  path: string
   excerpt: string
+  score: number
 }
 
-interface Gap {
-  topic: string
-  suggestion: string
+// --- Tree ---
+
+interface TreeNode {
+  name: string
+  isFile: boolean
+  children: TreeNode[]
+  file?: VaultFile
+  nodePath: string
 }
 
-const mockRelatedNotes: RelatedNote[] = [
-  {
-    title: "Zettelkasten Method Notes",
-    score: 87,
-    excerpt: "The Zettelkasten method emphasizes atomic notes and meaningful connections between ideas.",
-  },
-  {
-    title: "2024-01-15 Deep Work Summary",
-    score: 72,
-    excerpt: "Cal Newport argues that deep work is becoming increasingly rare in our economy.",
-  },
-  {
-    title: "Weekly Review Template",
-    score: 65,
-    excerpt: "Review what worked, what didn't, and plan for the upcoming week.",
-  },
-  {
-    title: "Building a Second Brain",
-    score: 58,
-    excerpt: "Tiago Forte's methodology for capturing and organizing digital information.",
-  },
-]
+function buildTree(files: VaultFile[]): TreeNode[] {
+  const root: TreeNode[] = []
 
-const mockGaps: Gap[] = [
-  {
-    topic: "spaced repetition",
-    suggestion: "Topic 'spaced repetition' mentioned but not explored",
-  },
-  {
-    topic: "learning techniques",
-    suggestion: "Consider linking to your learning techniques notes",
-  },
+  for (const file of files) {
+    const parts = file.relativePath.replace(/\\/g, "/").split("/")
+    let level = root
+
+    for (let i = 0; i < parts.length - 1; i++) {
+      const folderPath = parts.slice(0, i + 1).join("/")
+      let dir = level.find((n) => !n.isFile && n.name === parts[i])
+      if (!dir) {
+        dir = { name: parts[i], isFile: false, children: [], nodePath: folderPath }
+        level.push(dir)
+      }
+      level = dir.children
+    }
+
+    level.push({
+      name: parts[parts.length - 1],
+      isFile: true,
+      children: [],
+      file,
+      nodePath: file.relativePath,
+    })
+  }
+
+  function sortLevel(nodes: TreeNode[]): void {
+    nodes.sort((a, b) => {
+      if (a.isFile !== b.isFile) return a.isFile ? 1 : -1
+      return a.name.localeCompare(b.name)
+    })
+    nodes.forEach((n) => { if (!n.isFile) sortLevel(n.children) })
+  }
+  sortLevel(root)
+  return root
+}
+
+function TreeItem({
+  node,
+  depth,
+  onSelectNote,
+  activeNotePath,
+}: {
+  node: TreeNode
+  depth: number
+  onSelectNote: (file: VaultFile) => void
+  activeNotePath: string
+}) {
+  const [expanded, setExpanded] = useState(depth === 0)
+  const indent = depth * 12 + 6
+
+  if (!node.isFile) {
+    return (
+      <div>
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          className="flex w-full items-center gap-1.5 rounded py-0.5 text-left text-sm text-nore-text-secondary hover:bg-nore-elevated cursor-pointer hover:text-nore-text-primary transition-colors"
+          style={{ paddingLeft: `${indent}px`, paddingRight: "6px" }}
+        >
+          {expanded
+            ? <ChevronDown className="h-3 w-3 shrink-0 text-nore-text-tertiary" />
+            : <ChevronRight className="h-3 w-3 shrink-0 text-nore-text-tertiary" />}
+          <Folder className="h-3 w-3 shrink-0 text-nore-text-tertiary" />
+          <span className="truncate">{node.name}</span>
+        </button>
+        {expanded &&
+          node.children.map((child) => (
+            <TreeItem
+              key={child.nodePath}
+              node={child}
+              depth={depth + 1}
+              onSelectNote={onSelectNote}
+              activeNotePath={activeNotePath}
+            />
+          ))}
+      </div>
+    )
+  }
+
+  const isActive = node.nodePath === activeNotePath
+  return (
+    <button
+      onClick={() => node.file && onSelectNote(node.file)}
+      className={`flex w-full items-center gap-1.5 rounded py-0.5 text-left text-sm transition-colors cursor-pointer ${isActive
+        ? "bg-(--nore-accent-muted) text-(--nore-accent)"
+        : "text-nore-text-primary hover:bg-nore-elevated hover:text-(--nore-accent)"
+        }`}
+      style={{ paddingLeft: `${indent}px`, paddingRight: "6px" }}
+    >
+      <FileText className="h-3 w-3 shrink-0 text-nore-text-tertiary" />
+      <span className="truncate">{node.name}</span>
+    </button>
+  )
+}
+
+// --- Search helpers ---
+
+function extractSearchQuery(content: string): string {
+  const lines = content.split("\n")
+  const headings = lines
+    .filter((l) => /^#{1,3}\s/.test(l))
+    .map((l) => l.replace(/^#+\s+/, "").trim())
+  const firstPara = lines.find((l) => l.trim() && !l.startsWith("#")) ?? ""
+  return [...headings, firstPara].filter(Boolean).join(" ").slice(0, 500)
+}
+
+function noteToRelated(note: NoteRecord): RelatedNote {
+  const distance = note._distance ?? 1.414
+  // Voyage AI vectors are L2-normalized → cosine_similarity = 1 - d²/2
+  const score = Math.round(Math.max(0, (1 - (distance * distance) / 2) * 100))
+  const excerpt = note.content
+    .replace(/^---[\s\S]*?---\n?/, "")
+    .trim()
+    .slice(0, 180)
+  return { title: note.title, path: note.relativePath, excerpt, score }
+}
+
+// --- Toolbar ---
+
+const toolbarButtons = [
+  { icon: Bold, label: "Bold", shortcut: "Cmd+B" },
+  { icon: Italic, label: "Italic", shortcut: "Cmd+I" },
+  { icon: Heading, label: "Heading", shortcut: "Cmd+H" },
+  { icon: LinkIcon, label: "Link", shortcut: "Cmd+K" },
+  { icon: Code, label: "Code", shortcut: "Cmd+`" },
 ]
 
 const initialContent = `# Productivity Systems Review
@@ -78,54 +182,90 @@ The most important realization is that **no single system works in isolation**. 
 - Should I track habits separately or within my note-taking system?
 `
 
-const toolbarButtons = [
-  { icon: Bold, label: "Bold", shortcut: "Cmd+B" },
-  { icon: Italic, label: "Italic", shortcut: "Cmd+I" },
-  { icon: Heading, label: "Heading", shortcut: "Cmd+H" },
-  { icon: LinkIcon, label: "Link", shortcut: "Cmd+K" },
-  { icon: Code, label: "Code", shortcut: "Cmd+`" },
-]
+// --- Main component ---
 
 export function WriteScreen({ showLineNumbers, initialNote }: WriteScreenProps) {
   const [content, setContent] = useState(initialContent)
   const [fileName, setFileName] = useState("Productivity Systems Review.md")
+  const [activeNotePath, setActiveNotePath] = useState("")
 
   useEffect(() => {
     if (initialNote) {
       setContent(initialNote.content)
-      setFileName(initialNote.title.endsWith(".md") ? initialNote.title : `${initialNote.title}.md`)
+      setFileName(
+        initialNote.title.endsWith(".md") ? initialNote.title : `${initialNote.title}.md`
+      )
     }
   }, [initialNote])
-  const [panelWidth, setPanelWidth] = useState(40) // percentage
+
+  const [panelWidth, setPanelWidth] = useState(38)
   const [isResizing, setIsResizing] = useState(false)
-  const [isLoading, setIsLoading] = useState(false)
+  const [activePanel, setActivePanel] = useState<"connections" | "vault">("connections")
+
+  const [isSearching, setIsSearching] = useState(false)
   const [relatedNotes, setRelatedNotes] = useState<RelatedNote[]>([])
-  const [gaps, setGaps] = useState<Gap[]>([])
+  const [refreshTick, setRefreshTick] = useState(0)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Simulate loading connections when content changes
+  const [vaultTree, setVaultTree] = useState<TreeNode[]>([])
+  const [isLoadingVault, setIsLoadingVault] = useState(false)
+
+  // Load vault tree on mount
   useEffect(() => {
-    if (!content.trim()) {
-      setRelatedNotes([])
-      setGaps([])
-      return
+    async function loadTree() {
+      setIsLoadingVault(true)
+      try {
+        const vaultPath = await window.vault.getSavedPath()
+        if (!vaultPath) return
+        const files = await window.vault.loadFiles(vaultPath)
+        setVaultTree(buildTree(files))
+      } catch {
+        // vault not set up
+      } finally {
+        setIsLoadingVault(false)
+      }
     }
+    loadTree()
+  }, [])
 
-    setIsLoading(true)
-    const timer = setTimeout(() => {
-      setRelatedNotes(mockRelatedNotes)
-      setGaps(mockGaps)
-      setIsLoading(false)
-    }, 800)
-
-    return () => clearTimeout(timer)
-  }, [content])
-
-  const handleMouseDown = () => {
-    setIsResizing(true)
-  }
-
+  // Search related notes (debounced)
   useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
+    if (!content.trim()) { setRelatedNotes([]); return }
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(async () => {
+      setIsSearching(true)
+      try {
+        const query = extractSearchQuery(content)
+        if (!query.trim()) return
+        const results: NoteRecord[] = await window.search.query(query)
+        const currentTitle = fileName.replace(/\.md$/, "").toLowerCase()
+        const filtered = results
+          .map(noteToRelated)
+          .filter((n) => n.title.toLowerCase() !== currentTitle && n.score >= 50)
+          .slice(0, 6)
+        setRelatedNotes(filtered)
+      } catch {
+        // search unavailable
+      } finally {
+        setIsSearching(false)
+      }
+    }, 1500)
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
+  }, [content, fileName, refreshTick])
+
+  const handleRefresh = useCallback(() => setRefreshTick((t) => t + 1), [])
+
+  const handleSelectVaultNote = useCallback((file: VaultFile) => {
+    setContent(file.content)
+    setFileName(file.name)
+    setActiveNotePath(file.relativePath)
+    setActivePanel("connections")
+  }, [])
+
+  // Resize
+  const handleMouseDown = () => setIsResizing(true)
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
       if (!isResizing) return
       const container = document.getElementById("write-container")
       if (!container) return
@@ -133,43 +273,27 @@ export function WriteScreen({ showLineNumbers, initialNote }: WriteScreenProps) 
       const newWidth = ((rect.right - e.clientX) / rect.width) * 100
       setPanelWidth(Math.max(25, Math.min(60, newWidth)))
     }
-
-    const handleMouseUp = () => {
-      setIsResizing(false)
-    }
-
+    const onUp = () => setIsResizing(false)
     if (isResizing) {
-      document.addEventListener("mousemove", handleMouseMove)
-      document.addEventListener("mouseup", handleMouseUp)
+      document.addEventListener("mousemove", onMove)
+      document.addEventListener("mouseup", onUp)
     }
-
     return () => {
-      document.removeEventListener("mousemove", handleMouseMove)
-      document.removeEventListener("mouseup", handleMouseUp)
+      document.removeEventListener("mousemove", onMove)
+      document.removeEventListener("mouseup", onUp)
     }
   }, [isResizing])
-
-  const handleRefresh = () => {
-    setIsLoading(true)
-    setTimeout(() => {
-      setIsLoading(false)
-    }, 800)
-  }
 
   const lines = content.split("\n")
 
   return (
     <TooltipProvider delayDuration={300}>
       <div id="write-container" className="flex h-full">
-        {/* Editor panel */}
-        <div
-          className="flex flex-col overflow-hidden"
-          style={{ width: `${100 - panelWidth}%` }}
-        >
-          {/* Toolbar */}
-          <div className="flex h-10 items-center justify-between border-b border-nore-border px-4">
-            {/* File name */}
-            <div className="flex items-center gap-2">
+
+        {/* Editor */}
+        <div className="flex flex-col overflow-hidden " style={{ width: `${100 - panelWidth}%` }}>
+          <div className="flex min-h-10 items-center justify-between border-b border-nore-border px-4">
+            <div className="flex items-center gap-2 min-h-10">
               <FileText className="h-4 w-4 text-nore-text-tertiary" />
               <input
                 type="text"
@@ -178,13 +302,11 @@ export function WriteScreen({ showLineNumbers, initialNote }: WriteScreenProps) 
                 className="bg-transparent text-sm text-nore-text-primary focus:outline-none"
               />
             </div>
-
-            {/* Formatting buttons */}
             <div className="flex items-center gap-1">
               {toolbarButtons.map(({ icon: Icon, label, shortcut }) => (
                 <Tooltip key={label}>
                   <TooltipTrigger asChild>
-                    <button className="flex h-7 w-7 items-center justify-center rounded text-nore-text-secondary hover:bg-nore-elevated hover:text-nore-text-primary transition-colors">
+                    <button className="flex h-7 w-7 items-center justify-center rounded text-nore-text-secondary hover:bg-nore-elevated hover:text-nore-text-primary transition-colors cursor-pointer hover:text-(--nore-accent)">
                       <Icon className="h-4 w-4" />
                     </button>
                   </TooltipTrigger>
@@ -196,24 +318,19 @@ export function WriteScreen({ showLineNumbers, initialNote }: WriteScreenProps) 
             </div>
           </div>
 
-          {/* Editor area */}
           <div className="flex-1 overflow-y-auto scrollbar-thin">
             <div className="min-h-full p-6">
               {showLineNumbers ? (
                 <div className="flex font-mono text-sm">
-                  {/* Line numbers */}
                   <div className="flex flex-col pr-6 text-right text-nore-text-tertiary select-none">
                     {lines.map((_, i) => (
-                      <div key={i} className="leading-relaxed">
-                        {i + 1}
-                      </div>
+                      <div key={i} className="leading-relaxed">{i + 1}</div>
                     ))}
                   </div>
-                  {/* Editor */}
                   <textarea
                     value={content}
                     onChange={(e) => setContent(e.target.value)}
-                    className="flex-1 resize-none bg-transparent leading-relaxed text-nore-text-primary placeholder:text-nore-text-tertiary focus:outline-none caret-[var(--nore-accent)]"
+                    className="flex-1 resize-none bg-transparent leading-relaxed text-nore-text-primary placeholder:text-nore-text-tertiary focus:outline-none caret-(--nore-accent)"
                     placeholder="Start writing..."
                     spellCheck={false}
                     style={{ minHeight: "100%" }}
@@ -223,7 +340,7 @@ export function WriteScreen({ showLineNumbers, initialNote }: WriteScreenProps) 
                 <textarea
                   value={content}
                   onChange={(e) => setContent(e.target.value)}
-                  className="w-full resize-none bg-transparent font-mono text-sm leading-relaxed text-nore-text-primary placeholder:text-nore-text-tertiary focus:outline-none caret-[var(--nore-accent)]"
+                  className="w-full resize-none bg-transparent font-mono text-sm leading-relaxed text-nore-text-primary placeholder:text-nore-text-tertiary focus:outline-none caret-(--nore-accent)"
                   placeholder="Start writing..."
                   spellCheck={false}
                   style={{ minHeight: "calc(100vh - 160px)" }}
@@ -236,108 +353,129 @@ export function WriteScreen({ showLineNumbers, initialNote }: WriteScreenProps) 
         {/* Resize handle */}
         <div
           onMouseDown={handleMouseDown}
-          className={`flex w-px cursor-col-resize items-center justify-center bg-nore-border hover:bg-[var(--nore-accent)] transition-colors ${
-            isResizing ? "bg-[var(--nore-accent)]" : ""
-          }`}
+          className={`w-px cursor-col-resize bg-nore-border pr-1 bg-(--nore-text-primary) transition-colors ${isResizing ? "bg-(--nore-accent)" : ""
+            }`}
         />
 
-        {/* Suggestions panel */}
-        <div
-          className="flex flex-col overflow-hidden bg-nore-surface"
-          style={{ width: `${panelWidth}%` }}
-        >
-          <div className="flex items-center justify-between border-b border-nore-border px-4 py-3">
-            <h2 className="text-sm font-medium text-nore-text-primary">Connections</h2>
-            <button
-              onClick={handleRefresh}
-              className="rounded p-1 text-nore-text-secondary hover:bg-nore-elevated hover:text-nore-text-primary transition-colors"
-              title="Refresh connections"
-            >
-              <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
-            </button>
+        {/* Right panel */}
+        <div className="flex flex-col overflow-hidden bg-nore-surface" style={{ width: `${panelWidth}%` }}>
+
+          {/* Tab bar */}
+          <div className="flex items-center justify-between border-b border-nore-border px-3 py-2 min-h-10">
+            <div className="flex gap-0.5">
+              {(["connections", "vault"] as const).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setActivePanel(tab)}
+                  className={`rounded px-2.5 py-1 text-xs capitalize transition-colors ${activePanel === tab
+                    ? "bg-(--nore-accent-muted) text-(--nore-accent)"
+                    : "text-nore-text-secondary hover:text-nore-text-primary"
+                    }`}
+                >
+                  {tab}
+                </button>
+              ))}
+            </div>
+            {activePanel === "connections" && (
+              <button
+                onClick={handleRefresh}
+                className="rounded p-1 text-nore-text-secondary hover:bg-nore-elevated hover:text-nore-text-primary transition-colors"
+                title="Refresh connections"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${isSearching ? "animate-spin" : ""}`} />
+              </button>
+            )}
           </div>
 
-          <div className="flex-1 overflow-y-auto scrollbar-thin px-4 py-4">
-            {!content.trim() ? (
-              <p className="text-center text-sm text-nore-text-tertiary">
-                Start writing to see connections...
-              </p>
-            ) : isLoading ? (
-              <div className="space-y-4">
-                {[1, 2, 3].map((i) => (
-                  <div key={i} className="animate-pulse space-y-2">
-                    <div className="h-4 w-3/4 rounded bg-nore-elevated" />
-                    <div className="h-3 w-1/4 rounded bg-nore-elevated" />
-                    <div className="h-3 w-full rounded bg-nore-elevated" />
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <>
-                {/* Related Notes */}
-                <div className="mb-6">
-                  <h3 className="mb-3 text-xs font-medium uppercase tracking-wider text-nore-text-tertiary">
-                    Related Notes
-                  </h3>
-                  <div className="space-y-2">
-                    {relatedNotes.map((note, i) => (
-                      <div
-                        key={i}
-                        className="group cursor-pointer rounded-md border border-nore-border bg-nore-base p-3 hover:border-nore-border-hover transition-colors"
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2">
-                              <p className="truncate text-sm font-medium text-nore-text-primary group-hover:text-[var(--nore-accent)] transition-colors">
-                                {note.title}
-                              </p>
-                              <span className="flex-shrink-0 rounded bg-nore-elevated px-1.5 py-0.5 text-xs text-nore-text-secondary">
-                                {note.score}% match
-                              </span>
-                            </div>
+          {/* Connections tab */}
+          {activePanel === "connections" && (
+            <div className="flex-1 overflow-y-auto scrollbar-thin px-4 py-4">
+              {!content.trim() ? (
+                <p className="pt-8 text-center text-sm text-nore-text-tertiary">
+                  Start writing to see connections...
+                </p>
+              ) : isSearching ? (
+                <div className="space-y-4">
+                  {[1, 2, 3].map((i) => (
+                    <div key={i} className="animate-pulse space-y-2">
+                      <div className="h-4 w-3/4 rounded bg-nore-elevated" />
+                      <div className="h-3 w-1/4 rounded bg-nore-elevated" />
+                      <div className="h-3 w-full rounded bg-nore-elevated" />
+                    </div>
+                  ))}
+                </div>
+              ) : relatedNotes.length === 0 ? (
+                <p className="pt-4 text-sm text-nore-text-tertiary">
+                  No related notes found in vault
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {relatedNotes.map((note, i) => (
+                    <div
+                      key={i}
+                      className="group cursor-pointer rounded-md border border-nore-border bg-nore-base p-3 hover:border-nore-border-hover transition-colors"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <p className="truncate text-sm font-medium text-nore-text-primary group-hover:text-(--nore-accent) transition-colors">
+                              {note.title}
+                            </p>
+                            <span className="shrink-0 rounded bg-nore-elevated px-1.5 py-0.5 text-xs text-nore-text-secondary">
+                              {note.score}%
+                            </span>
+                          </div>
+                          {note.excerpt && (
                             <p className="mt-1 line-clamp-1 text-xs text-nore-text-secondary">
                               {note.excerpt}
                             </p>
-                          </div>
-                          <ExternalLink className="h-3.5 w-3.5 flex-shrink-0 text-nore-text-tertiary opacity-0 group-hover:opacity-100 transition-opacity" />
+                          )}
+                          <p className="mt-0.5 truncate font-mono text-xs text-nore-text-tertiary">
+                            {note.path}
+                          </p>
                         </div>
+                        <ExternalLink className="h-3.5 w-3.5 shrink-0 text-nore-text-tertiary opacity-0 group-hover:opacity-100 transition-opacity" />
                       </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Gaps Detected */}
-                {gaps.length > 0 && (
-                  <div>
-                    <h3 className="mb-3 text-xs font-medium uppercase tracking-wider text-nore-text-tertiary">
-                      Gaps Detected
-                    </h3>
-                    <div className="space-y-2">
-                      {gaps.map((gap, i) => (
-                        <div
-                          key={i}
-                          className="rounded-md border border-amber-500/20 bg-amber-500/5 p-3"
-                        >
-                          <div className="flex items-start gap-2">
-                            <div className="mt-0.5 h-2 w-2 flex-shrink-0 rounded-full bg-amber-500" />
-                            <div className="min-w-0 flex-1">
-                              <p className="text-xs text-nore-text-secondary">
-                                {gap.suggestion}
-                              </p>
-                              <button className="mt-2 flex items-center gap-1 rounded px-2 py-1 text-xs text-nore-text-secondary hover:text-[var(--nore-accent)] transition-colors">
-                                <Plus className="h-3 w-3" />
-                                Create note
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
                     </div>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Vault tab */}
+          {activePanel === "vault" && (
+            <div className="flex-1 overflow-y-auto scrollbar-thin py-2">
+              {isLoadingVault ? (
+                <div className="space-y-1.5 px-3 pt-2">
+                  {[1, 2, 3, 4, 5].map((i) => (
+                    <div key={i} className="flex animate-pulse items-center gap-2">
+                      <div className="h-3 w-3 rounded bg-nore-elevated" />
+                      <div
+                        className="h-3 rounded bg-nore-elevated"
+                        style={{ width: `${40 + i * 10}%` }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              ) : vaultTree.length === 0 ? (
+                <p className="px-4 pt-8 text-center text-sm text-nore-text-tertiary">
+                  No vault connected
+                </p>
+              ) : (
+                vaultTree.map((node) => (
+                  <TreeItem
+                    key={node.nodePath}
+                    node={node}
+                    depth={0}
+                    onSelectNote={handleSelectVaultNote}
+                    activeNotePath={activeNotePath}
+                  />
+                ))
+              )}
+            </div>
+          )}
+
         </div>
       </div>
     </TooltipProvider>

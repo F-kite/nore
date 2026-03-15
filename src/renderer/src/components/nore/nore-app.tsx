@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { MessageCircle, PenLine, Settings, Search } from 'lucide-react'
+import { MessageCircle, PenLine, Settings, Search, Minus, Square, X } from 'lucide-react'
 import { ChatScreen } from './screens/chat-screen'
 import { WriteScreen } from './screens/write-screen'
 import { SettingsScreen } from './screens/settings-screen'
@@ -218,6 +218,8 @@ export function NoreApp() {
     setState((s) => ({ ...s, ...updates }))
   }, [])
 
+  const isMac = window.platform?.isMac ?? false
+
   const navTabs = [
     { screen: 'chat' as Screen, icon: MessageCircle, label: 'Chat' },
     { screen: 'write' as Screen, icon: PenLine, label: 'Write' }
@@ -254,62 +256,57 @@ export function NoreApp() {
   return (
     <TooltipProvider delayDuration={300}>
       <div className="flex h-screen w-screen flex-col overflow-hidden bg-nore-base">
-        {/* Top Bar */}
-        <header className="flex h-12 flex-shrink-0 items-center border-b border-nore-border bg-nore-surface px-4">
-          {/* Left: Logo */}
-          <div className="flex items-center gap-2">
-            <div className="flex h-5 w-5 items-center justify-center">
-              <svg
-                viewBox="0 0 24 24"
-                className="h-5 w-5"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                style={{ color: 'var(--nore-accent)' }}
-              >
+        {/* Top Bar — draggable window chrome */}
+        <header
+          className="grid h-12 shrink-0 grid-cols-[1fr_auto_1fr] items-center border-b border-nore-border bg-nore-surface"
+          style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+        >
+          {/* Left col: macOS spacer + Logo */}
+          <div className="flex items-center">
+            {isMac && <div className="w-20 shrink-0" />}
+            <div className="flex items-center gap-2 px-4">
+              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: 'var(--nore-accent)' }}>
                 <path d="M12 2L2 7l10 5 10-5-10-5z" />
                 <path d="M2 17l10 5 10-5" />
                 <path d="M2 12l10 5 10-5" />
               </svg>
+              <span className="text-sm font-medium text-nore-text-primary">Nore</span>
             </div>
-            <span className="text-sm font-medium text-nore-text-primary">Nore</span>
           </div>
 
-          {/* Center: Navigation Tabs */}
-          <nav className="absolute left-1/2 flex -translate-x-1/2 items-center gap-1">
+          {/* Center col: Navigation tabs */}
+          <nav className="flex items-center gap-1">
             {navTabs.map(({ screen, icon: Icon, label }) => {
               const isActive = state.screen === screen
               return (
                 <button
                   key={screen}
                   onClick={() => setScreen(screen)}
-                  className={`relative flex items-center gap-2 px-4 py-3 text-sm transition-colors ${isActive
-                      ? 'text-[var(--nore-accent)]'
-                      : 'text-nore-text-secondary hover:text-nore-text-primary'
-                    }`}
+                  style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+                  className={`relative flex items-center gap-2 px-4 py-3 text-sm transition-colors ${
+                    isActive ? 'text-(--nore-accent)' : 'text-nore-text-secondary hover:text-nore-text-primary'
+                  }`}
                 >
                   <Icon className="h-4 w-4" />
                   <span>{label}</span>
                   {isActive && (
-                    <div
-                      className="absolute bottom-0 left-0 right-0 h-0.5 rounded-t-full transition-all"
-                      style={{ backgroundColor: 'var(--nore-accent)' }}
-                    />
+                    <div className="absolute bottom-0 left-0 right-0 h-0.5 rounded-t-full bg-(--nore-accent)" />
                   )}
                 </button>
               )
             })}
           </nav>
 
-          {/* Right: Search, Settings, Vault Status */}
-          <div className="ml-auto flex items-center gap-3">
+          {/* Right col: Search + Settings + Vault status + Window controls */}
+          <div className="flex items-center justify-end gap-3 px-4">
             <button
               onClick={openSearch}
-              className="flex items-center gap-2 rounded-md border border-nore-border bg-nore-base px-2.5 py-1.5 text-sm text-nore-text-secondary transition-colors hover:border-nore-border-hover hover:text-nore-text-primary"
+              style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+              className="flex flex-1 min-w-24 max-w-80 items-center gap-2 rounded-md border border-nore-border bg-nore-base px-2.5 py-1.5 text-sm text-nore-text-secondary transition-colors hover:border-nore-border-hover hover:text-nore-text-primary"
             >
               <Search className="h-3.5 w-3.5" />
               <span>Search</span>
-              <kbd className="ml-1 rounded border border-nore-border bg-nore-surface px-1 py-0.5 text-xs text-nore-text-tertiary">
+              <kbd className="ml-auto rounded border border-nore-border bg-nore-surface px-1 py-0.5 text-xs text-nore-text-tertiary">
                 Ctrl+K
               </kbd>
             </button>
@@ -318,35 +315,62 @@ export function NoreApp() {
               <TooltipTrigger asChild>
                 <button
                   onClick={() => setScreen('settings')}
-                  className={`flex h-8 w-8 items-center justify-center rounded-md transition-colors ${state.screen === 'settings'
-                      ? 'bg-nore-elevated text-[var(--nore-accent)]'
+                  style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors ${
+                    state.screen === 'settings'
+                      ? 'bg-nore-elevated text-(--nore-accent)'
                       : 'text-nore-text-secondary hover:bg-nore-elevated hover:text-nore-text-primary'
-                    }`}
+                  }`}
                 >
-                  <Settings className="h-4 w-4" />
+                  <Settings className="h-5 w-5" />
                 </button>
               </TooltipTrigger>
-              <TooltipContent
-                side="bottom"
-                className="border-nore-border bg-nore-elevated text-nore-text-primary"
-              >
-                <p>
-                  Settings <span className="ml-2 text-nore-text-tertiary">Ctrl+,</span>
-                </p>
+              <TooltipContent side="bottom" className="border-nore-border bg-nore-elevated text-nore-text-primary">
+                <p>Settings <span className="ml-2 text-nore-text-tertiary">Ctrl+,</span></p>
               </TooltipContent>
             </Tooltip>
 
-            <div className="flex items-center gap-2 text-xs text-nore-text-secondary">
-              <div
-                className={`h-2 w-2 rounded-full ${state.indexStatus === 'up-to-date'
-                    ? 'bg-green-500'
-                    : state.indexStatus === 'indexing'
-                      ? 'animate-pulse bg-amber-500'
-                      : 'bg-red-500'
-                  }`}
-              />
+            <div
+              style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+              className="flex shrink-0 items-center gap-2 text-xs text-nore-text-secondary"
+            >
+              <div className={`h-2 w-2 rounded-full ${
+                state.indexStatus === 'up-to-date' ? 'bg-green-500'
+                  : state.indexStatus === 'indexing' ? 'animate-pulse bg-amber-500'
+                    : 'bg-red-500'
+              }`} />
               <span>{state.noteCount} notes</span>
             </div>
+
+            {/* Windows/Linux: custom window controls */}
+            {!isMac && (
+              <div className="-mr-4 flex h-12 shrink-0 items-stretch">
+                <button
+                  onClick={() => window.windowControls.minimize()}
+                  style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+                  className="flex w-11 items-center justify-center text-nore-text-tertiary transition-colors hover:bg-nore-elevated hover:text-nore-text-primary"
+                  title="Minimize"
+                >
+                  <Minus className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  onClick={() => window.windowControls.toggleMaximize()}
+                  style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+                  className="flex w-11 items-center justify-center text-nore-text-tertiary transition-colors hover:bg-nore-elevated hover:text-nore-text-primary"
+                  title="Maximize"
+                >
+                  <Square className="h-3 w-3" />
+                </button>
+                <button
+                  onClick={() => window.windowControls.close()}
+                  style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+                  className="flex w-11 items-center justify-center text-nore-text-tertiary transition-colors hover:bg-red-500 hover:text-white"
+                  title="Close"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
           </div>
         </header>
 
