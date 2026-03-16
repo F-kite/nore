@@ -115,6 +115,8 @@ function StreamingCursor() {
   )
 }
 
+const STORAGE_KEY = "nore-chats"
+
 export function ChatScreen({ noteCount, tagCount, backlinkCount, lastIndexed }: ChatScreenProps) {
   const [chats, setChats] = useState<Chat[]>([])
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null)
@@ -124,6 +126,7 @@ export function ChatScreen({ noteCount, tagCount, backlinkCount, lastIndexed }: 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const streamingRef = useRef<{ chatId: string; messageId: string } | null>(null)
+  const persistedRef = useRef(false) // prevents saving before initial load completes
 
   const selectedChat = chats.find((c) => c.id === selectedChatId)
   const messages = selectedChat?.messages || []
@@ -131,6 +134,38 @@ export function ChatScreen({ noteCount, tagCount, backlinkCount, lastIndexed }: 
   const groupedChats = groupChatsByDate(chats)
   const groupOrder = ["Today", "Yesterday", "Previous 7 Days", "Older"]
   const isGenerating = messages.some((m) => m.isStreaming)
+
+  // Load persisted chats on mount
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY)
+      if (raw) {
+        const parsed = JSON.parse(raw) as { chats: (Omit<Chat, "createdAt"> & { createdAt: string })[]; selectedChatId: string | null }
+        const restored: Chat[] = parsed.chats.map((c) => ({
+          ...c,
+          createdAt: new Date(c.createdAt),
+          // clear streaming flag in case app was closed mid-stream
+          messages: c.messages.map((m) => ({ ...m, isStreaming: false }))
+        }))
+        setChats(restored)
+        setSelectedChatId(parsed.selectedChatId ?? null)
+      }
+    } catch {
+      // corrupted storage — start fresh
+    }
+    persistedRef.current = true
+  }, [])
+
+  // Persist chats after every change (skip during streaming to avoid excessive writes)
+  useEffect(() => {
+    if (!persistedRef.current) return
+    if (isGenerating) return
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ chats, selectedChatId }))
+    } catch {
+      // storage full or unavailable
+    }
+  }, [chats, selectedChatId, isGenerating])
 
   // Register LLM token listener once on mount
   useEffect(() => {

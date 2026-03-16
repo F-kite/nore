@@ -12,7 +12,13 @@ import {
   loadVaultFiles
 } from './vault'
 import icon from '../../resources/icon.png?asset'
-import { getSettings, updateSettings, getDefaultShortcuts, saveApiKey, getMaskedApiKey, hasApiKey } from './settings'
+import {
+  getSettings, updateSettings, getDefaultShortcuts,
+  saveApiKey, getMaskedApiKey, hasApiKey,
+  getLlmConnections, addLlmConnection, deleteLlmConnection,
+  setActiveLlmConnection, getActiveConnection, getConnectionApiKey, getMaskedConnectionApiKey
+} from './settings'
+import type { LLMConnection } from './settings'
 import { indexVault, getProgress, searchNotes } from './indexer'
 import { streamChat } from './llm'
 import type { LLMChatMessage } from './llm'
@@ -132,6 +138,57 @@ app.whenReady().then(() => {
       }
     })
   })
+
+  // LLM connection check (uses active connection)
+  ipcMain.handle('llm:checkConnection', async (): Promise<{ ok: boolean; error?: string }> => {
+    try {
+      const conn = getActiveConnection()
+      if (!conn) throw new Error('No active connection configured.')
+
+      if (conn.provider === 'ollama') {
+        const base = conn.baseUrl || 'http://localhost:11434'
+        const res = await fetch(`${base}/api/tags`)
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      } else if (conn.provider === 'lmstudio') {
+        const base = conn.baseUrl || 'http://localhost:1234'
+        const res = await fetch(`${base}/v1/models`)
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      } else if (conn.provider === 'openai') {
+        const key = getConnectionApiKey(conn.id)
+        if (!key) throw new Error('API key not set')
+        const res = await fetch('https://api.openai.com/v1/models', {
+          headers: { Authorization: `Bearer ${key}` }
+        })
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      } else if (conn.provider === 'anthropic') {
+        const key = getConnectionApiKey(conn.id)
+        if (!key) throw new Error('API key not set')
+        const res = await fetch('https://api.anthropic.com/v1/models', {
+          headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' }
+        })
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      }
+
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, error: (err as Error).message }
+    }
+  })
+
+  // LLM connections CRUD
+  ipcMain.handle('llm:getConnections', (): LLMConnection[] => getLlmConnections())
+
+  ipcMain.handle('llm:addConnection', (_, conn: Omit<LLMConnection, 'id'>, apiKey: string): LLMConnection =>
+    addLlmConnection(conn, apiKey)
+  )
+
+  ipcMain.handle('llm:deleteConnection', (_, id: string): void => deleteLlmConnection(id))
+
+  ipcMain.handle('llm:setActiveConnection', (_, id: string): void => setActiveLlmConnection(id))
+
+  ipcMain.handle('llm:getMaskedConnectionKey', (_, id: string): string =>
+    getMaskedConnectionApiKey(id)
+  )
 
   // --- Settings ---
   ipcMain.handle('settings:get', () => {
