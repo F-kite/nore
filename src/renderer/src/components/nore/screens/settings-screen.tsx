@@ -59,7 +59,7 @@ const LLM_PROVIDERS = [
     id: 'lmstudio' as const,
     label: 'LM Studio',
     models: [],
-    needsKey: false,
+    needsKey: true,
     defaultUrl: 'http://localhost:1234'
   }
 ]
@@ -100,22 +100,32 @@ function keyEventToShortcut(e: KeyboardEvent): string | null {
 
 export function SettingsScreen({ state, onUpdate }: SettingsScreenProps) {
   const [isReindexing, setIsReindexing] = useState(false)
+  const [isCheckingApiConnection, setIsCheckingApiConnection] = useState(false)
+  const [apiConnectionStatus, setApiConnectionStatus] = useState<'idle' | 'success' | 'error'>('idle')
+  const [apiConnectionError, setApiConnectionError] = useState<string | null>(null)
   const colorInputRef = useRef<HTMLInputElement>(null)
 
-  // API keys state
+  // API keys state (embeddings only)
   const [embeddingsKeyMasked, setEmbeddingsKeyMasked] = useState('')
-  const [llmKeyMasked, setLlmKeyMasked] = useState('')
   const [hasEmbeddingsKey, setHasEmbeddingsKey] = useState(false)
-  const [hasLlmKey, setHasLlmKey] = useState(false)
-  const [editingKey, setEditingKey] = useState<'embeddings' | 'llm' | null>(null)
+  const [editingKey, setEditingKey] = useState<'embeddings' | null>(null)
   const [keyInput, setKeyInput] = useState('')
   const [showKeyInput, setShowKeyInput] = useState(false)
 
-  // LLM state
-  const [llmProvider, setLlmProvider] = useState<'openai' | 'anthropic' | 'ollama' | 'lmstudio'>('openai')
-  const [llmModel, setLlmModel] = useState('gpt-4o-mini')
-  const [llmDisplayName, setLlmDisplayName] = useState('')
-  const [llmBaseUrl, setLlmBaseUrl] = useState('http://localhost:11434')
+  // LLM connections state
+  const [connections, setConnections] = useState<import('../../../../../types/index.d').LLMConnection[]>([])
+  const [activeConnectionId, setActiveConnectionId] = useState<string | null>(null)
+  const [maskedKeys, setMaskedKeys] = useState<Record<string, string>>({})
+
+  // Add-connection form state
+  const [showAddForm, setShowAddForm] = useState(false)
+  const [formProvider, setFormProvider] = useState<'openai' | 'anthropic' | 'ollama' | 'lmstudio'>('openai')
+  const [formModel, setFormModel] = useState('gpt-4o-mini')
+  const [formDisplayName, setFormDisplayName] = useState('')
+  const [formBaseUrl, setFormBaseUrl] = useState('')
+  const [formApiKey, setFormApiKey] = useState('')
+  const [formShowKey, setFormShowKey] = useState(false)
+  const [formSaving, setFormSaving] = useState(false)
 
   // Shortcuts state
   const [shortcuts, setShortcuts] = useState<Record<string, string>>({})
@@ -130,23 +140,20 @@ export function SettingsScreen({ state, onUpdate }: SettingsScreenProps) {
       try {
         setIsMac(window.platform?.isMac ?? false)
         const settings = await window.settings.get()
-        setLlmProvider(settings.llmProvider || 'openai')
-        setLlmModel(settings.llmModel || 'gpt-4o-mini')
-        setLlmDisplayName(settings.llmDisplayName || '')
-        setLlmBaseUrl(settings.llmBaseUrl || 'http://localhost:11434')
         setShortcuts(settings.shortcuts || {})
-        const defaults = await window.settings.getDefaultShortcuts()
-        setDefaultShortcuts(defaults)
-        const [hasEmb, hasLlm, embMasked, llmMask] = await Promise.all([
+        const [defaults, hasEmb, embMasked, conns] = await Promise.all([
+          window.settings.getDefaultShortcuts(),
           window.apiKeys.has('embeddings'),
-          window.apiKeys.has('llm'),
           window.apiKeys.getMasked('embeddings'),
-          window.apiKeys.getMasked('llm')
+          window.llm.getConnections()
         ])
+        setDefaultShortcuts(defaults)
         setHasEmbeddingsKey(hasEmb)
-        setHasLlmKey(hasLlm)
         setEmbeddingsKeyMasked(embMasked)
-        setLlmKeyMasked(llmMask)
+        setConnections(conns)
+        setActiveConnectionId(settings.activeLlmConnectionId ?? null)
+        const masked = await Promise.all(conns.map(async (c) => [c.id, await window.llm.getMaskedConnectionKey(c.id)] as const))
+        setMaskedKeys(Object.fromEntries(masked))
       } catch (err) {
         console.error('Failed to load settings:', err)
       }
@@ -193,6 +200,26 @@ export function SettingsScreen({ state, onUpdate }: SettingsScreenProps) {
     }
   }
 
+  const handleCheckingApiConnection = async () => {
+    setIsCheckingApiConnection(true)
+    setApiConnectionStatus('idle')
+    setApiConnectionError(null)
+    try {
+      const result = await window.llm.checkConnection()
+      if (result.ok) {
+        setApiConnectionStatus('success')
+      } else {
+        setApiConnectionStatus('error')
+        setApiConnectionError(result.error ?? 'Connection failed')
+      }
+    } catch (err) {
+      setApiConnectionStatus('error')
+      setApiConnectionError((err as Error).message)
+    } finally {
+      setIsCheckingApiConnection(false)
+    }
+  }
+
   const handleChangeFolder = async () => {
     const newPath = await window.vault.selectFolder()
     if (newPath) {
@@ -206,53 +233,61 @@ export function SettingsScreen({ state, onUpdate }: SettingsScreenProps) {
     if (!editingKey || !keyInput.trim()) return
     await window.apiKeys.save(editingKey, keyInput.trim())
     const masked = await window.apiKeys.getMasked(editingKey)
-    if (editingKey === 'embeddings') {
-      setEmbeddingsKeyMasked(masked)
-      setHasEmbeddingsKey(true)
-    } else {
-      setLlmKeyMasked(masked)
-      setHasLlmKey(true)
-    }
+    setEmbeddingsKeyMasked(masked)
+    setHasEmbeddingsKey(true)
     setEditingKey(null)
     setKeyInput('')
     setShowKeyInput(false)
   }
 
-  const handleRemoveApiKey = async (keyName: 'embeddings' | 'llm') => {
-    await window.apiKeys.remove(keyName)
-    if (keyName === 'embeddings') {
-      setEmbeddingsKeyMasked('')
-      setHasEmbeddingsKey(false)
-    } else {
-      setLlmKeyMasked('')
-      setHasLlmKey(false)
-    }
+  const handleRemoveApiKey = async () => {
+    await window.apiKeys.remove('embeddings')
+    setEmbeddingsKeyMasked('')
+    setHasEmbeddingsKey(false)
   }
 
-  const handleProviderChange = useCallback(async (provider: 'openai' | 'anthropic' | 'ollama' | 'lmstudio') => {
-    const providerConfig = LLM_PROVIDERS.find((p) => p.id === provider)
-    const model = providerConfig?.models[0] || ''
-    const defaultUrl = providerConfig && 'defaultUrl' in providerConfig ? providerConfig.defaultUrl : ''
-    setLlmProvider(provider)
-    setLlmModel(model)
-    if (defaultUrl) setLlmBaseUrl(defaultUrl)
-    await window.settings.update({ llmProvider: provider, llmModel: model, ...(defaultUrl ? { llmBaseUrl: defaultUrl } : {}) })
-  }, [])
+  const handleSetActive = async (id: string) => {
+    await window.llm.setActiveConnection(id)
+    setActiveConnectionId(id)
+  }
 
-  const handleModelChange = useCallback(async (model: string) => {
-    setLlmModel(model)
-    await window.settings.update({ llmModel: model })
-  }, [])
+  const handleDeleteConnection = async (id: string) => {
+    await window.llm.deleteConnection(id)
+    const updated = connections.filter((c) => c.id !== id)
+    setConnections(updated)
+    if (activeConnectionId === id) setActiveConnectionId(updated[0]?.id ?? null)
+    setMaskedKeys((prev) => { const n = { ...prev }; delete n[id]; return n })
+  }
 
-  const handleDisplayNameChange = useCallback(async (name: string) => {
-    setLlmDisplayName(name)
-    await window.settings.update({ llmDisplayName: name })
-  }, [])
-
-  const handleBaseUrlChange = useCallback(async (url: string) => {
-    setLlmBaseUrl(url)
-    await window.settings.update({ llmBaseUrl: url })
-  }, [])
+  const handleAddConnection = async () => {
+    const providerConfig = LLM_PROVIDERS.find((p) => p.id === formProvider)
+    const isLocal = formProvider === 'ollama' || formProvider === 'lmstudio'
+    setFormSaving(true)
+    try {
+      const newConn = await window.llm.addConnection(
+        {
+          displayName: formDisplayName.trim() || `${providerConfig?.label} – ${formModel}`,
+          provider: formProvider,
+          model: formModel,
+          baseUrl: isLocal ? formBaseUrl : ''
+        },
+        formApiKey
+      )
+      const updatedConns = [...connections, newConn]
+      setConnections(updatedConns)
+      if (!activeConnectionId) setActiveConnectionId(newConn.id)
+      const masked = await window.llm.getMaskedConnectionKey(newConn.id)
+      setMaskedKeys((prev) => ({ ...prev, [newConn.id]: masked }))
+      setShowAddForm(false)
+      setFormApiKey('')
+      setFormDisplayName('')
+      setFormModel(LLM_PROVIDERS.find((p) => p.id === formProvider)?.models[0] || 'gpt-4o-mini')
+      setFormProvider('openai')
+      setFormBaseUrl('')
+    } finally {
+      setFormSaving(false)
+    }
+  }
 
   const handleResetShortcut = useCallback(async (actionId: string) => {
     const defaultValue = defaultShortcuts[actionId]
@@ -261,9 +296,6 @@ export function SettingsScreen({ state, onUpdate }: SettingsScreenProps) {
     setShortcuts(updated)
     await window.settings.update({ shortcuts: updated })
   }, [shortcuts, defaultShortcuts])
-
-  const currentProvider = LLM_PROVIDERS.find((p) => p.id === llmProvider)
-  const isLocalProvider = llmProvider === 'ollama' || llmProvider === 'lmstudio'
 
   return (
     <div className="h-full overflow-y-auto scrollbar-thin">
@@ -347,7 +379,7 @@ export function SettingsScreen({ state, onUpdate }: SettingsScreenProps) {
                 onEdit={() => { setEditingKey('embeddings'); setKeyInput(''); setShowKeyInput(false) }}
                 onSave={handleSaveApiKey}
                 onCancel={() => setEditingKey(null)}
-                onRemove={() => handleRemoveApiKey('embeddings')}
+                onRemove={handleRemoveApiKey}
                 onInputChange={setKeyInput}
                 onToggleShow={() => setShowKeyInput(!showKeyInput)}
               />
@@ -448,124 +480,185 @@ export function SettingsScreen({ state, onUpdate }: SettingsScreenProps) {
           <h2 className="mb-4 text-xs font-medium uppercase tracking-wider text-nore-text-tertiary">
             AI Model
           </h2>
-          <div className="space-y-4">
 
-            {/* Provider */}
-            <div className="flex items-center justify-between">
-              <p className="text-sm text-nore-text-secondary">Provider</p>
-              <div className="inline-flex rounded-md border border-nore-border bg-nore-base p-0.5">
-                {LLM_PROVIDERS.map((provider) => (
-                  <button
-                    key={provider.id}
-                    onClick={() => handleProviderChange(provider.id)}
-                    className={`rounded px-3 py-1 text-xs transition-colors cursor-pointer ${llmProvider === provider.id
-                      ? 'bg-(--nore-accent) text-white'
-                      : 'text-nore-text-secondary hover:text-nore-text-primary  hover:text-(--nore-accent)'
-                      }`}
-                  >
-                    {provider.label}
-                  </button>
-                ))}
+          {/* Connections list */}
+          <div className="mb-3 space-y-2">
+            {connections.length === 0 && (
+              <p className="text-sm text-nore-text-tertiary">No connections yet. Add one below.</p>
+            )}
+            {connections.map((conn) => {
+              const isActive = conn.id === activeConnectionId
+              const providerLabel = LLM_PROVIDERS.find((p) => p.id === conn.provider)?.label ?? conn.provider
+              return (
+                <div
+                  key={conn.id}
+                  className={`flex items-center justify-between rounded-md border px-3 py-2.5 transition-colors ${isActive ? 'border-(--nore-accent) bg-nore-elevated' : 'border-nore-border bg-nore-base'}`}
+                >
+                  <div className="flex min-w-0 items-center gap-3">
+                    <span className={`h-2 w-2 shrink-0 rounded-full ${isActive ? 'bg-(--nore-accent)' : 'bg-nore-border'}`} />
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-nore-text-primary">{conn.displayName}</p>
+                      <div className="mt-0.5 flex items-center gap-2">
+                        <span className="rounded bg-nore-surface px-1.5 py-0.5 text-xs text-nore-text-tertiary">{providerLabel}</span>
+                        <span className="truncate text-xs text-nore-text-tertiary">{conn.model}</span>
+                        {maskedKeys[conn.id] && (
+                          <span className="font-mono text-xs text-nore-text-tertiary">{maskedKeys[conn.id]}</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="ml-3 flex shrink-0 items-center gap-2">
+                    {isActive
+                      ? <span className="text-xs font-medium text-(--nore-accent)">Active</span>
+                      : <button onClick={() => handleSetActive(conn.id)} className="cursor-pointer text-xs text-nore-text-tertiary transition-colors hover:text-(--nore-accent)">Set active</button>
+                    }
+                    <button onClick={() => handleDeleteConnection(conn.id)} className="cursor-pointer text-nore-text-tertiary transition-colors hover:text-red-400" title="Delete">
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+
+          {/* Add connection form / button */}
+          {!showAddForm ? (
+            <button
+              onClick={() => setShowAddForm(true)}
+              className="flex w-full cursor-pointer items-center gap-2 rounded-md border border-dashed border-nore-border px-3 py-2 text-sm text-nore-text-tertiary transition-colors hover:border-(--nore-accent) hover:text-(--nore-accent)"
+            >
+              <span className="text-base leading-none">+</span>
+              Add connection
+            </button>
+          ) : (
+            <div className="space-y-3 rounded-md border border-nore-border bg-nore-base p-4">
+              <p className="text-sm font-medium text-nore-text-primary">New connection</p>
+
+              {/* Provider */}
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-nore-text-secondary">Provider</p>
+                <div className="inline-flex rounded-md border border-nore-border bg-nore-surface p-0.5">
+                  {LLM_PROVIDERS.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => {
+                        setFormProvider(p.id)
+                        setFormModel(p.models[0] || '')
+                        setFormBaseUrl('defaultUrl' in p ? (p.defaultUrl ?? '') : '')
+                      }}
+                      className={`cursor-pointer rounded px-3 py-1 text-xs transition-colors ${formProvider === p.id ? 'bg-(--nore-accent) text-white' : 'text-nore-text-secondary hover:text-(--nore-accent)'}`}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
 
-            {/* Model */}
-            <div className="flex items-center justify-between">
-              <div>
+              {/* Model */}
+              <div className="flex items-center justify-between">
                 <p className="text-sm text-nore-text-secondary">Model</p>
-                {currentProvider && currentProvider.models.length > 0 && (
-                  <p className="mt-0.5 text-xs text-nore-text-tertiary">
-                    Type or pick a preset
-                  </p>
-                )}
-              </div>
-              <div className="flex flex-col items-end gap-1">
                 <input
-                  list="model-suggestions"
-                  value={llmModel}
-                  onChange={(e) => handleModelChange(e.target.value)}
-                  placeholder={
-                    llmProvider === 'lmstudio'
-                      ? 'Enter model identifier from LM Studio'
-                      : llmProvider === 'ollama'
-                        ? 'e.g. llama3.1'
-                        : 'e.g. gpt-4o-mini'
-                  }
-                  className="w-64 rounded-md border border-nore-border bg-nore-base px-3 py-1.5 text-sm text-nore-text-primary outline-none focus:border-(--nore-accent)"
+                  list="add-conn-models"
+                  value={formModel}
+                  onChange={(e) => setFormModel(e.target.value)}
+                  placeholder="e.g. gpt-4o-mini"
+                  className="w-56 rounded-md border border-nore-border bg-nore-surface px-3 py-1.5 text-sm text-nore-text-primary outline-none focus:border-(--nore-accent)"
                 />
-                <datalist id="model-suggestions">
-                  {currentProvider?.models.map((m) => <option key={m} value={m} />)}
+                <datalist id="add-conn-models">
+                  {LLM_PROVIDERS.find((p) => p.id === formProvider)?.models.map((m) => <option key={m} value={m} />)}
                 </datalist>
               </div>
-            </div>
 
-            {/* Display name */}
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-nore-text-secondary">Display name</p>
-                <p className="mt-0.5 text-xs text-nore-text-tertiary">Your label for this configuration</p>
-              </div>
-              <input
-                type="text"
-                value={llmDisplayName}
-                onChange={(e) => handleDisplayNameChange(e.target.value)}
-                placeholder={`My ${currentProvider?.label || 'AI'}`}
-                className="w-64 rounded-md border border-nore-border bg-nore-base px-3 py-1.5 text-sm text-nore-text-primary outline-none focus:border-(--nore-accent)"
-              />
-            </div>
-
-            {/* Base URL — local providers only */}
-            {isLocalProvider ? (
+              {/* Display name */}
               <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-nore-text-secondary">Base URL</p>
-                  <p className="mt-0.5 text-xs text-nore-text-tertiary">
-                    Endpoint where requests are sent
-                  </p>
-                </div>
+                <p className="text-sm text-nore-text-secondary">Display name</p>
                 <input
                   type="text"
-                  value={llmBaseUrl}
-                  onChange={(e) => handleBaseUrlChange(e.target.value)}
-                  placeholder={currentProvider && 'defaultUrl' in currentProvider ? currentProvider.defaultUrl : ''}
-                  className="w-64 rounded-md border border-nore-border bg-nore-base px-3 py-1.5 text-sm text-nore-text-primary outline-none focus:border-(--nore-accent)"
+                  value={formDisplayName}
+                  onChange={(e) => setFormDisplayName(e.target.value)}
+                  placeholder={`My ${LLM_PROVIDERS.find((p) => p.id === formProvider)?.label ?? ''}`}
+                  className="w-56 rounded-md border border-nore-border bg-nore-surface px-3 py-1.5 text-sm text-nore-text-primary outline-none focus:border-(--nore-accent)"
                 />
               </div>
-            ) : (
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-nore-text-secondary">Base URL</p>
-                  <p className="mt-0.5 text-xs text-nore-text-tertiary">Managed by provider</p>
-                </div>
-                <p className="font-mono text-xs text-nore-text-tertiary">
-                  {currentProvider && 'endpoint' in currentProvider ? currentProvider.endpoint : ''}
-                </p>
-              </div>
-            )}
 
-            {/* API Key — cloud providers only */}
-            {currentProvider?.needsKey && (
-              <div className="pt-1">
-                <p className="mb-2 text-xs text-nore-text-tertiary">
-                  Encrypted and stored locally on your device.
-                </p>
-                <ApiKeyRow
-                  label={`${currentProvider.label} API key`}
-                  hasKey={hasLlmKey}
-                  maskedKey={llmKeyMasked}
-                  isEditing={editingKey === 'llm'}
-                  keyInput={keyInput}
-                  showInput={showKeyInput}
-                  onEdit={() => { setEditingKey('llm'); setKeyInput(''); setShowKeyInput(false) }}
-                  onSave={handleSaveApiKey}
-                  onCancel={() => setEditingKey(null)}
-                  onRemove={() => handleRemoveApiKey('llm')}
-                  onInputChange={setKeyInput}
-                  onToggleShow={() => setShowKeyInput(!showKeyInput)}
-                />
+              {/* Base URL — local providers */}
+              {(formProvider === 'ollama' || formProvider === 'lmstudio') && (
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-nore-text-secondary">Base URL</p>
+                  <input
+                    type="text"
+                    value={formBaseUrl}
+                    onChange={(e) => setFormBaseUrl(e.target.value)}
+                    placeholder={formProvider === 'ollama' ? 'http://localhost:11434' : 'http://localhost:1234'}
+                    className="w-56 rounded-md border border-nore-border bg-nore-surface px-3 py-1.5 text-sm text-nore-text-primary outline-none focus:border-(--nore-accent)"
+                  />
+                </div>
+              )}
+
+              {/* API key — cloud providers */}
+              {LLM_PROVIDERS.find((p) => p.id === formProvider)?.needsKey && (
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-nore-text-secondary">API key</p>
+                  <div className="relative w-56">
+                    <input
+                      type={formShowKey ? 'text' : 'password'}
+                      value={formApiKey}
+                      onChange={(e) => setFormApiKey(e.target.value)}
+                      placeholder="Paste your API key..."
+                      className="w-full rounded-md border border-nore-border bg-nore-surface px-3 py-1.5 pr-8 font-mono text-xs text-nore-text-primary outline-none focus:border-(--nore-accent)"
+                    />
+                    <button
+                      onClick={() => setFormShowKey(!formShowKey)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 cursor-pointer text-nore-text-tertiary hover:text-nore-text-secondary"
+                    >
+                      {formShowKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Actions */}
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <button
+                  onClick={() => { setShowAddForm(false); setFormApiKey('') }}
+                  className="cursor-pointer px-3 py-1.5 text-sm text-nore-text-tertiary transition-colors hover:text-nore-text-primary"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleAddConnection}
+                  disabled={formSaving || !formModel.trim()}
+                  className="cursor-pointer rounded-md bg-(--nore-accent) px-4 py-1.5 text-sm text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+                >
+                  {formSaving ? 'Saving...' : 'Save connection'}
+                </button>
               </div>
-            )}
-          </div>
+            </div>
+          )}
+
+          {/* Check active connection */}
+          {connections.length > 0 && (
+            <div className="mt-4 flex items-center gap-3">
+              <button
+                onClick={handleCheckingApiConnection}
+                disabled={isCheckingApiConnection}
+                className="flex cursor-pointer items-center gap-2 rounded-md border border-nore-border bg-transparent px-3 py-1.5 text-sm text-nore-text-primary transition-colors hover:bg-nore-elevated hover:text-(--nore-accent) disabled:opacity-50"
+              >
+                <RefreshCw className={`h-4 w-4 ${isCheckingApiConnection ? 'animate-spin' : ''}`} />
+                {isCheckingApiConnection ? 'Checking...' : 'Check active connection'}
+              </button>
+              {apiConnectionStatus === 'success' && (
+                <span className="flex items-center gap-1.5 text-sm text-green-500">
+                  <Check className="h-4 w-4" />Connected
+                </span>
+              )}
+              {apiConnectionStatus === 'error' && (
+                <span className="flex items-center gap-1.5 text-sm text-red-500" title={apiConnectionError ?? undefined}>
+                  <X className="h-4 w-4" />{apiConnectionError ?? 'Failed'}
+                </span>
+              )}
+            </div>
+          )}
         </section>
 
         <div className="mb-8 h-px bg-nore-border" />

@@ -48,7 +48,15 @@ const llmAPI = {
     ipcRenderer.invoke('llm:chat', params),
   onToken: (callback: (data: { chatId: string; token: string }) => void) => {
     onLLMTokenCallback = callback
-  }
+  },
+  checkConnection: (): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('llm:checkConnection'),
+  getConnections: () => ipcRenderer.invoke('llm:getConnections'),
+  addConnection: (conn: { displayName: string; provider: string; model: string; baseUrl: string }, apiKey: string) =>
+    ipcRenderer.invoke('llm:addConnection', conn, apiKey),
+  deleteConnection: (id: string) => ipcRenderer.invoke('llm:deleteConnection', id),
+  setActiveConnection: (id: string) => ipcRenderer.invoke('llm:setActiveConnection', id),
+  getMaskedConnectionKey: (id: string) => ipcRenderer.invoke('llm:getMaskedConnectionKey', id)
 }
 
 // Window controls (frameless window)

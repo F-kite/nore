@@ -27,11 +27,23 @@ export interface NoteRecord {
 
 export type LLMProvider = 'openai' | 'anthropic' | 'ollama' | 'lmstudio'
 
+export interface LLMConnection {
+  id: string
+  displayName: string
+  provider: LLMProvider
+  model: string
+  baseUrl: string
+}
+
 export interface AppSettings {
   accentColor: string
   customAccentColor: string
   fontSize: string
   showLineNumbers: boolean
+  // Multi-connection LLM
+  llmConnections: LLMConnection[]
+  activeLlmConnectionId: string | null
+  // @deprecated — kept for migration
   llmProvider: LLMProvider
   llmModel: string
   llmDisplayName: string
@@ -69,6 +81,12 @@ declare global {
     llm: {
       chat: (params: { chatId: string; messages: LLMChatMessage[]; contextNotes: string }) => Promise<void>
       onToken: (callback: (data: { chatId: string; token: string }) => void) => void
+      checkConnection: () => Promise<{ ok: boolean; error?: string }>
+      getConnections: () => Promise<LLMConnection[]>
+      addConnection: (conn: Omit<LLMConnection, 'id'>, apiKey: string) => Promise<LLMConnection>
+      deleteConnection: (id: string) => Promise<void>
+      setActiveConnection: (id: string) => Promise<void>
+      getMaskedConnectionKey: (id: string) => Promise<string>
     }
     windowControls: {
       minimize: () => void

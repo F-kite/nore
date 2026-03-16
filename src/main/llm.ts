@@ -1,5 +1,5 @@
 import OpenAI from 'openai'
-import { getSettings, getApiKey } from './settings'
+import { getActiveConnection, getConnectionApiKey } from './settings'
 
 export interface LLMChatMessage {
   role: 'user' | 'assistant'
@@ -27,13 +27,13 @@ ${
 async function streamChatOpenAI(
   params: StreamChatParams,
   apiKey: string,
-  baseURL?: string
+  baseURL?: string,
+  model?: string
 ): Promise<void> {
-  const settings = getSettings()
   const client = new OpenAI({ apiKey, ...(baseURL ? { baseURL } : {}) })
 
   const stream = await client.chat.completions.create({
-    model: settings.llmModel || 'gpt-4o-mini',
+    model: model || 'gpt-4o-mini',
     messages: [
       { role: 'system', content: buildSystemPrompt(params.contextNotes) },
       ...params.messages.map((m) => ({ role: m.role, content: m.content }))
@@ -47,9 +47,11 @@ async function streamChatOpenAI(
   }
 }
 
-async function streamChatAnthropic(params: StreamChatParams, apiKey: string): Promise<void> {
-  const settings = getSettings()
-
+async function streamChatAnthropic(
+  params: StreamChatParams,
+  apiKey: string,
+  model?: string
+): Promise<void> {
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -58,7 +60,7 @@ async function streamChatAnthropic(params: StreamChatParams, apiKey: string): Pr
       'anthropic-version': '2023-06-01'
     },
     body: JSON.stringify({
-      model: settings.llmModel || 'claude-haiku-4-5-20251001',
+      model: model || 'claude-haiku-4-5-20251001',
       max_tokens: 2048,
       system: buildSystemPrompt(params.contextNotes),
       messages: params.messages.map((m) => ({ role: m.role, content: m.content })),
@@ -104,31 +106,31 @@ async function streamChatAnthropic(params: StreamChatParams, apiKey: string): Pr
 }
 
 export async function streamChat(params: StreamChatParams): Promise<void> {
-  const settings = getSettings()
-  const apiKey = getApiKey('llm')
+  const conn = getActiveConnection()
+  if (!conn) throw new Error('No active LLM connection. Add one in Settings → AI Model.')
 
-  switch (settings.llmProvider) {
+  const apiKey = getConnectionApiKey(conn.id)
+
+  switch (conn.provider) {
     case 'openai':
-      if (!apiKey)
-        throw new Error('OpenAI API key is not configured. Add it in Settings → API Keys.')
-      return streamChatOpenAI(params, apiKey)
+      if (!apiKey) throw new Error('OpenAI API key is not configured.')
+      return streamChatOpenAI(params, apiKey, conn.baseUrl || undefined, conn.model)
 
     case 'anthropic':
-      if (!apiKey)
-        throw new Error('Anthropic API key is not configured. Add it in Settings → API Keys.')
-      return streamChatAnthropic(params, apiKey)
+      if (!apiKey) throw new Error('Anthropic API key is not configured.')
+      return streamChatAnthropic(params, apiKey, conn.model)
 
     case 'ollama': {
-      const base = (settings.llmBaseUrl || 'http://localhost:11434').replace(/\/$/, '')
-      return streamChatOpenAI(params, 'ollama', `${base}/v1`)
+      const base = (conn.baseUrl || 'http://localhost:11434').replace(/\/$/, '')
+      return streamChatOpenAI(params, 'ollama', `${base}/v1`, conn.model)
     }
 
     case 'lmstudio': {
-      const base = (settings.llmBaseUrl || 'http://localhost:1234').replace(/\/$/, '')
-      return streamChatOpenAI(params, 'lmstudio', `${base}/v1`)
+      const base = (conn.baseUrl || 'http://localhost:1234').replace(/\/$/, '')
+      return streamChatOpenAI(params, 'lmstudio', `${base}/v1`, conn.model)
     }
 
     default:
-      throw new Error(`Unknown LLM provider: ${settings.llmProvider}`)
+      throw new Error(`Unknown LLM provider: ${conn.provider}`)
   }
 }
