@@ -385,6 +385,13 @@ export function NoreApp() {
               tagCount={state.tagCount}
               backlinkCount={state.backlinkCount}
               lastIndexed={state.lastIndexed}
+              onOpenInWrite={(note) => {
+                setState((s) => ({
+                  ...s,
+                  screen: 'write',
+                  selectedNoteForWrite: { title: note.title, content: note.content }
+                }))
+              }}
             />
           </div>
           <div
