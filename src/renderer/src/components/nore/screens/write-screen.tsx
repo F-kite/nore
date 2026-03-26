@@ -206,6 +206,15 @@ export function WriteScreen({ showLineNumbers, initialNote }: WriteScreenProps) 
   const [relatedNotes, setRelatedNotes] = useState<RelatedNote[]>([])
   const [refreshTick, setRefreshTick] = useState(0)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  // Auto-grow textarea to content height — outer container scrolls, not the textarea
+  useEffect(() => {
+    const el = textareaRef.current
+    if (!el) return
+    el.style.height = "auto"
+    el.style.height = `${el.scrollHeight}px`
+  }, [content])
 
   const [vaultTree, setVaultTree] = useState<TreeNode[]>([])
   const [isLoadingVault, setIsLoadingVault] = useState(false)
@@ -328,22 +337,22 @@ export function WriteScreen({ showLineNumbers, initialNote }: WriteScreenProps) 
                     ))}
                   </div>
                   <textarea
+                    ref={textareaRef}
                     value={content}
                     onChange={(e) => setContent(e.target.value)}
-                    className="flex-1 resize-none bg-transparent leading-relaxed text-nore-text-primary placeholder:text-nore-text-tertiary focus:outline-none caret-(--nore-accent)"
+                    className="flex-1 resize-none overflow-hidden bg-transparent leading-relaxed text-nore-text-primary placeholder:text-nore-text-tertiary focus:outline-none caret-(--nore-accent)"
                     placeholder="Start writing..."
                     spellCheck={false}
-                    style={{ minHeight: "100%" }}
                   />
                 </div>
               ) : (
                 <textarea
+                  ref={textareaRef}
                   value={content}
                   onChange={(e) => setContent(e.target.value)}
-                  className="w-full resize-none bg-transparent font-mono text-sm leading-relaxed text-nore-text-primary placeholder:text-nore-text-tertiary focus:outline-none caret-(--nore-accent)"
+                  className="w-full resize-none overflow-hidden bg-transparent font-mono text-sm leading-relaxed text-nore-text-primary placeholder:text-nore-text-tertiary focus:outline-none caret-(--nore-accent)"
                   placeholder="Start writing..."
                   spellCheck={false}
-                  style={{ minHeight: "calc(100vh - 160px)" }}
                 />
               )}
             </div>
