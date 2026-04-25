@@ -44,11 +44,17 @@ let onLLMTokenCallback: ((data: { chatId: string; token: string }) => void) | nu
 ipcRenderer.on('llm:token', (_, data) => onLLMTokenCallback?.(data))
 
 const llmAPI = {
-  chat: (params: { chatId: string; messages: { role: string; content: string }[]; contextNotes: string }) =>
-    ipcRenderer.invoke('llm:chat', params),
+  chat: (params: {
+    chatId: string
+    messages: { role: string; content: string }[]
+    contextNotes: string
+    model?: string
+    attachments?: { name: string; type: 'text' | 'image'; content: string; mimeType?: string }[]
+  }) => ipcRenderer.invoke('llm:chat', params),
   onToken: (callback: (data: { chatId: string; token: string }) => void) => {
     onLLMTokenCallback = callback
   },
+  fetchModels: (): Promise<string[]> => ipcRenderer.invoke('llm:fetchModels'),
   checkConnection: (): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke('llm:checkConnection'),
   getConnections: () => ipcRenderer.invoke('llm:getConnections'),

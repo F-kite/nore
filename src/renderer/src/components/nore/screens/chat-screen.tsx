@@ -4,8 +4,9 @@ import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import {
   ArrowUp, ChevronDown, ChevronRight, Link2, Plus, MoreHorizontal, Trash2, Pencil,
-  Copy, Check, RotateCcw, ChevronLeft, X, PenLine
+  Copy, Check, RotateCcw, ChevronLeft, X, PenLine, Paperclip, FileText, User, Image as ImageIcon, RefreshCw
 } from "lucide-react"
+import type { ChatAttachment } from "../../../../../types/index.d"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,8 +19,10 @@ interface ChatScreenProps {
   noteCount: number
   tagCount: number
   backlinkCount: number
+  indexStatus: 'up-to-date' | 'indexing' | 'error'
   lastIndexed: string
   onOpenInWrite: (note: { title: string; content: string }) => void
+  newChatRef?: React.RefObject<(() => void) | null>
 }
 
 interface Source {
@@ -221,17 +224,25 @@ function CopyButton({ text }: { text: string }) {
   )
 }
 
-export function ChatScreen({ noteCount, tagCount, backlinkCount, lastIndexed, onOpenInWrite }: ChatScreenProps) {
+export function ChatScreen({ noteCount, tagCount, backlinkCount, indexStatus, lastIndexed, onOpenInWrite, newChatRef }: ChatScreenProps) {
   const [chats, setChats] = useState<Chat[]>([])
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null)
   const [input, setInput] = useState("")
   const [isSearching, setIsSearching] = useState(false)
   const [expandedSources, setExpandedSources] = useState<Record<string, boolean>>({})
   const [popupNote, setPopupNote] = useState<Source | null>(null)
+  const [renamingChatId, setRenamingChatId] = useState<string | null>(null)
+  const [renameInput, setRenameInput] = useState("")
+  const [availableModels, setAvailableModels] = useState<string[]>([])
+  const [selectedModel, setSelectedModel] = useState<string>("")
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([])
+  const [isDragging, setIsDragging] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const streamingRef = useRef<{ chatId: string; assistantMsgId: string; versionId: string } | null>(null)
   const persistedRef = useRef(false)
+  const dragCounterRef = useRef(0)
 
   const selectedChat = chats.find((c) => c.id === selectedChatId)
   const messages = selectedChat?.messages || []
@@ -299,15 +310,111 @@ export function ChatScreen({ noteCount, tagCount, backlinkCount, lastIndexed, on
     })
   }, [])
 
+  // Fetch available models on mount
+  useEffect(() => {
+    window.llm.fetchModels().then((models) => {
+      setAvailableModels(models)
+    }).catch(() => { })
+  }, [])
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages, isSearching])
 
-  const handleNewChat = () => {
+  // Auto-resize chat textarea (max 5 lines, then scroll)
+  useEffect(() => {
+    const el = textareaRef.current
+    if (!el) return
+    el.style.height = "auto"
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`
+    el.style.overflowY = el.scrollHeight > 120 ? "auto" : "hidden"
+  }, [input])
+
+  // --- File helpers ---
+
+  const IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"]
+  const TEXT_EXTENSIONS = [".txt", ".md", ".csv", ".json", ".js", ".ts", ".jsx", ".tsx", ".py", ".html", ".css", ".xml", ".yaml", ".yml", ".toml", ".ini", ".log", ".sh", ".bat", ".sql", ".rs", ".go", ".java", ".c", ".cpp", ".h"]
+
+  function isTextFile(file: File): boolean {
+    if (file.type.startsWith("text/")) return true
+    const ext = "." + file.name.split(".").pop()?.toLowerCase()
+    return TEXT_EXTENSIONS.includes(ext)
+  }
+
+  async function readFileAsAttachment(file: File): Promise<ChatAttachment | null> {
+    if (IMAGE_TYPES.includes(file.type)) {
+      return new Promise((resolve) => {
+        const reader = new FileReader()
+        reader.onload = () => {
+          const base64 = (reader.result as string).split(",")[1]
+          resolve({ name: file.name, type: "image", content: base64, mimeType: file.type })
+        }
+        reader.onerror = () => resolve(null)
+        reader.readAsDataURL(file)
+      })
+    }
+    if (isTextFile(file)) {
+      return new Promise((resolve) => {
+        const reader = new FileReader()
+        reader.onload = () => {
+          resolve({ name: file.name, type: "text", content: reader.result as string })
+        }
+        reader.onerror = () => resolve(null)
+        reader.readAsText(file)
+      })
+    }
+    return null
+  }
+
+  async function handleFiles(files: FileList | File[]) {
+    const results = await Promise.all(Array.from(files).map(readFileAsAttachment))
+    const valid = results.filter(Boolean) as ChatAttachment[]
+    if (valid.length) setAttachments((prev) => [...prev, ...valid])
+  }
+
+  const removeAttachment = (index: number) => {
+    setAttachments((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  // --- Drag and drop ---
+
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    dragCounterRef.current++
+    if (e.dataTransfer.types.includes("Files")) setIsDragging(true)
+  }
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    dragCounterRef.current--
+    if (dragCounterRef.current === 0) setIsDragging(false)
+  }
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+  }
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    dragCounterRef.current = 0
+    setIsDragging(false)
+    if (e.dataTransfer.files.length) await handleFiles(e.dataTransfer.files)
+  }
+
+  const handleNewChat = useCallback(() => {
     const newChat: Chat = { id: Date.now().toString(), title: "New conversation", messages: [], createdAt: new Date() }
     setChats((prev) => [newChat, ...prev])
     setSelectedChatId(newChat.id)
-  }
+  }, [])
+
+  // Expose handleNewChat to parent via ref
+  useEffect(() => {
+    if (newChatRef) newChatRef.current = handleNewChat
+  }, [newChatRef, handleNewChat])
 
   const handleDeleteChat = (chatId: string) => {
     setChats((prev) => {
@@ -315,6 +422,19 @@ export function ChatScreen({ noteCount, tagCount, backlinkCount, lastIndexed, on
       if (selectedChatId === chatId) setSelectedChatId(filtered[0]?.id || null)
       return filtered
     })
+  }
+
+  const handleStartRename = (chat: Chat) => {
+    setRenamingChatId(chat.id)
+    setRenameInput(chat.title)
+  }
+
+  const handleConfirmRename = () => {
+    if (!renamingChatId || !renameInput.trim()) { setRenamingChatId(null); return }
+    setChats((prev) =>
+      prev.map((c) => c.id === renamingChatId ? { ...c, title: renameInput.trim() } : c)
+    )
+    setRenamingChatId(null)
   }
 
   // Core: run LLM for a given message. If assistantMsgId is provided → add new version. Otherwise → create new assistant message.
@@ -377,7 +497,7 @@ export function ChatScreen({ noteCount, tagCount, backlinkCount, lastIndexed, on
     streamingRef.current = { chatId, assistantMsgId, versionId }
 
     try {
-      await window.llm.chat({ chatId, messages: llmMessages, contextNotes })
+      await window.llm.chat({ chatId, messages: llmMessages, contextNotes, model: selectedModel || undefined, attachments: attachments.length > 0 ? attachments : undefined })
       setChats((prev) =>
         prev.map((chat) => {
           if (chat.id !== chatId) return chat
@@ -417,12 +537,13 @@ export function ChatScreen({ noteCount, tagCount, backlinkCount, lastIndexed, on
     } finally {
       streamingRef.current = null
     }
-  }, [])
+  }, [selectedModel, attachments])
 
   const handleSend = async () => {
-    if (!input.trim() || isSearching || isGenerating) return
-    const queryText = input.trim()
+    if ((!input.trim() && attachments.length === 0) || isSearching || isGenerating) return
+    const queryText = input.trim() || (attachments.length > 0 ? `Analyze: ${attachments.map((a) => a.name).join(", ")}` : "")
     setInput("")
+    setAttachments([])
 
     let chatId = selectedChatId
     if (!chatId) {
@@ -522,11 +643,11 @@ export function ChatScreen({ noteCount, tagCount, backlinkCount, lastIndexed, on
   return (
     <div className="flex h-full">
       {/* Chat History Panel */}
-      <div className="flex w-65 shrink-0 flex-col border-r border-nore-border bg-nore-base">
+      <div className="flex w-65 shrink-0 select-none flex-col border-r border-nore-border bg-nore-base">
         <div className="p-3">
           <button
             onClick={handleNewChat}
-            className="flex w-full items-center justify-center gap-2 rounded-md border border-(--nore-accent) px-3 py-2 text-sm text-(--nore-accent) transition-all hover:bg-(--nore-accent-muted) hover:scale-[1.01]"
+            className="flex w-full items-center justify-center gap-2 rounded-md border border-(--nore-accent) px-3 py-2 text-sm text-(--nore-accent) cursor-pointer transition-all hover:bg-(--nore-accent-muted) hover:scale-[1.01]"
           >
             <Plus className="h-4 w-4" />
             New Chat
@@ -552,21 +673,32 @@ export function ChatScreen({ noteCount, tagCount, backlinkCount, lastIndexed, on
                         {selectedChatId === chat.id && (
                           <div className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r-full" style={{ backgroundColor: "var(--nore-accent)" }} />
                         )}
-                        <button onClick={() => setSelectedChatId(chat.id)} className="flex-1 truncate px-3 py-2 text-left text-sm text-nore-text-primary">
-                          {chat.title}
-                        </button>
+                        {renamingChatId === chat.id ? (
+                          <input
+                            autoFocus
+                            value={renameInput}
+                            onChange={(e) => setRenameInput(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === "Enter") handleConfirmRename(); if (e.key === "Escape") setRenamingChatId(null) }}
+                            onBlur={handleConfirmRename}
+                            className="flex-1 rounded bg-nore-surface px-3 py-1.5 text-sm text-nore-text-primary outline-none border border-(--nore-accent)"
+                          />
+                        ) : (
+                          <button onClick={() => setSelectedChatId(chat.id)} className="flex-1 truncate px-3 py-2 text-left text-sm text-nore-text-primary cursor-pointer">
+                            {chat.title}
+                          </button>
+                        )}
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <button className="mr-1 flex h-6 w-6 items-center justify-center rounded opacity-0 transition-opacity hover:bg-nore-border group-hover:opacity-100">
-                              <MoreHorizontal className="h-3.5 w-3.5 text-nore-text-secondary" />
+                              <MoreHorizontal className="h-3.5 w-3.5 text-nore-text-secondary cursor-pointer hover:text-nore-text-primary" />
                             </button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end" className="border-nore-border bg-nore-elevated">
-                            <DropdownMenuItem className="text-nore-text-primary hover:bg-nore-border focus:bg-nore-border">
+                            <DropdownMenuItem onClick={() => handleStartRename(chat)} className="text-nore-text-primary cursor-pointer hover:bg-nore-border focus:bg-nore-border">
                               <Pencil className="mr-2 h-3.5 w-3.5" />
                               Rename
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => handleDeleteChat(chat.id)} className="text-red-400 hover:bg-nore-border focus:bg-nore-border">
+                            <DropdownMenuItem onClick={() => handleDeleteChat(chat.id)} className="text-red-400 cursor-pointer hover:bg-nore-border focus:bg-nore-border">
                               <Trash2 className="mr-2 h-3.5 w-3.5" />
                               Delete
                             </DropdownMenuItem>
@@ -581,13 +713,39 @@ export function ChatScreen({ noteCount, tagCount, backlinkCount, lastIndexed, on
           )}
         </div>
 
-        <div className="border-t border-nore-border px-4 py-3">
+        <div className="flex justify-evenly border-t border-nore-border px-4 py-3">
           <p className="text-xs text-nore-text-tertiary">{chats.length} conversations</p>
+
+          <div
+            style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+            className="flex shrink-0 items-center gap-2 text-xs text-nore-text-secondary"
+          >
+            <div className={`h-2 w-2 rounded-full ${indexStatus === 'up-to-date' ? 'bg-green-500'
+              : indexStatus === 'indexing' ? 'animate-pulse bg-amber-500'
+                : 'bg-red-500'
+              }`} />
+            <span>{noteCount} notes</span>
+          </div>
         </div>
       </div>
 
       {/* Conversation Area */}
-      <div className="flex flex-1 flex-col">
+      <div
+        className="relative flex flex-1 flex-col"
+        onDragEnter={handleDragEnter}
+        onDragLeave={handleDragLeave}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
+      >
+        {/* Drag overlay */}
+        {isDragging && (
+          <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center rounded-lg border-2 border-dashed border-(--nore-accent) bg-nore-base/80 backdrop-blur-sm">
+            <div className="flex flex-col items-center gap-2">
+              <Paperclip className="h-8 w-8 text-(--nore-accent)" />
+              <p className="text-sm font-medium text-(--nore-accent)">Drop files to attach</p>
+            </div>
+          </div>
+        )}
         {isEmpty ? (
           <div className="flex flex-1 flex-col items-center justify-center px-8">
             <div className="mb-4 flex h-8 w-8 items-center justify-center">
@@ -597,7 +755,7 @@ export function ChatScreen({ noteCount, tagCount, backlinkCount, lastIndexed, on
                 <path d="M2 12l10 5 10-5" />
               </svg>
             </div>
-            <p className="mb-4 text-sm text-nore-text-secondary">Ask your knowledge base</p>
+            <p className="text-md text-nore-text-secondary">Ask your knowledge base</p>
             <p className="mb-6 text-xs text-nore-text-tertiary">
               {noteCount} notes indexed &middot; {tagCount} tags &middot; {backlinkCount} backlinks
               {lastIndexed && <> &middot; Last synced {lastIndexed}</>}
@@ -631,7 +789,8 @@ export function ChatScreen({ noteCount, tagCount, backlinkCount, lastIndexed, on
                   <div key={message.id} className="animate-in fade-in slide-in-from-bottom-2 duration-300">
                     <div className="mb-2 flex items-center gap-2">
                       {isUser ? (
-                        <div className="flex h-6 w-6 items-center justify-center rounded-full bg-nore-elevated text-xs font-medium text-nore-text-secondary">Y</div>
+                        // <div className="flex  items-center justify-center rounded-full bg-nore-elevated text-xs font-medium text-nore-text-secondary">Y</div>
+                        <User className="h-5 w-5"/>
                       ) : (
                         <div className="flex h-6 w-6 items-center justify-center">
                           <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: isError ? "var(--nore-text-tertiary)" : "var(--nore-accent)" }}>
@@ -696,10 +855,10 @@ export function ChatScreen({ noteCount, tagCount, backlinkCount, lastIndexed, on
                         <div className="mt-4">
                           <button
                             onClick={() => toggleSources(message.id)}
-                            className="flex items-center gap-1.5 text-xs text-nore-text-secondary transition-colors cursor-pointer hover:text-(--nore-accent) hover:text-nore-text-primary"
+                            className="flex items-center gap-1.5 text-md text-nore-text-secondary transition-colors cursor-pointer hover:text-(--nore-accent) hover:text-nore-text-primary"
                           >
-                            {expandedSources[message.id] ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                            <Link2 className="h-3 w-3" />
+                            {expandedSources[message.id] ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                            <Link2 className="h-4 w-4" />
                             <span>{sources.length} sources</span>
                           </button>
                           {expandedSources[message.id] && (
@@ -765,12 +924,67 @@ export function ChatScreen({ noteCount, tagCount, backlinkCount, lastIndexed, on
         )}
 
         {/* Input area */}
-        <div className="border-t border-nore-border bg-nore-base px-6 py-4">
+        <div className="select-none border-t border-nore-border bg-nore-base px-6 py-4">
           <div className="mx-auto max-w-180">
-            <p className="mb-2 text-xs text-nore-text-tertiary">
-              {isSearching ? "Searching vault..." : isGenerating ? "Generating response..." : `Searching across ${noteCount} notes`}
-            </p>
-            <div className="flex items-end gap-3 rounded-lg border border-nore-border bg-nore-surface p-3 transition-colors focus-within:border-(--nore-accent)">
+            {/* Top row: status + model selector */}
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-sm text-nore-text-tertiary">
+                {isSearching ? "Searching vault..." : isGenerating ? "Generating response..." : `Searching across ${noteCount} notes`}
+              </p>
+              <div className="flex items-center gap-1.5">
+                <input
+                  list="chat-model-list"
+                  value={selectedModel}
+                  onChange={(e) => setSelectedModel(e.target.value)}
+                  placeholder="Default model"
+                  className="w-45 rounded border border-nore-border bg-nore-surface px-2 py-1 text-xs text-nore-text-secondary outline-none transition-colors hover:border-nore-border-hover focus:border-(--nore-accent)"
+                />
+                <datalist id="chat-model-list" className="">
+                  {availableModels.map((m) => (
+                    <option key={m} value={m} />
+                  ))}
+                </datalist>
+                <button
+                  onClick={() => { window.llm.fetchModels().then(setAvailableModels).catch(() => {}) }}
+                  title="Refresh models"
+                  className="flex h-5 w-5 cursor-pointer items-center justify-center rounded text-nore-text-tertiary transition-colors hover:text-(--nore-accent)"
+                >
+                  <RefreshCw className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Attachment chips */}
+            {attachments.length > 0 && (
+              <div className="mb-2 flex flex-wrap gap-2">
+                {attachments.map((att, i) => (
+                  <div key={i} className="flex items-center gap-1.5 rounded-md border border-nore-border bg-nore-surface px-2 py-1">
+                    {att.type === "image" ? <ImageIcon className="h-3.5 w-3.5 text-nore-text-tertiary" /> : <FileText className="h-3.5 w-3.5 text-nore-text-tertiary" />}
+                    <span className="max-w-32 truncate text-xs text-nore-text-secondary">{att.name}</span>
+                    <button onClick={() => removeAttachment(i)} className="cursor-pointer text-nore-text-tertiary transition-colors hover:text-red-400">
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Input box */}
+            <div className="flex items-center gap-3 rounded-lg border border-nore-border bg-nore-surface p-2 transition-colors focus-within:border-(--nore-accent)">
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-md text-nore-text-tertiary transition-colors hover:bg-nore-elevated hover:text-nore-text-secondary"
+                title="Attach file"
+              >
+                <Paperclip className="h-4 w-4" />
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={(e) => { if (e.target.files?.length) { handleFiles(e.target.files); e.target.value = "" } }}
+              />
               <textarea
                 ref={textareaRef}
                 value={input}
@@ -779,13 +993,12 @@ export function ChatScreen({ noteCount, tagCount, backlinkCount, lastIndexed, on
                 placeholder="Ask your knowledge base..."
                 rows={1}
                 disabled={isInputDisabled}
-                className="flex-1 resize-none bg-transparent text-sm text-nore-text-primary placeholder:text-nore-text-tertiary focus:outline-none disabled:opacity-50"
-                style={{ maxHeight: "120px" }}
+                className="flex-1 resize-none overflow-hidden bg-transparent text-md text-nore-text-primary placeholder:text-nore-text-tertiary focus:outline-none disabled:opacity-50"
               />
               <button
                 onClick={handleSend}
-                disabled={!input.trim() || isInputDisabled}
-                className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors ${input.trim() && !isInputDisabled ? "bg-(--nore-accent) text-white hover:opacity-90" : "bg-nore-elevated text-nore-text-tertiary"}`}
+                disabled={(!input.trim() && attachments.length === 0) || isInputDisabled}
+                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors ${(input.trim() || attachments.length > 0) && !isInputDisabled ? "bg-(--nore-accent) text-white hover:opacity-90 cursor-pointer " : "bg-nore-elevated text-nore-text-tertiary"}`}
               >
                 <ArrowUp className="h-4 w-4" />
               </button>

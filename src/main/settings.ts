@@ -33,7 +33,7 @@ export interface AppSettings {
 }
 
 const DEFAULT_SHORTCUTS: Record<string, string> = {
-  newChat: 'CmdOrCtrl+N',
+  newChat: 'CmdOrCtrl+T',
   searchNotes: 'CmdOrCtrl+K',
   switchChat: 'CmdOrCtrl+1',
   switchWrite: 'CmdOrCtrl+2',

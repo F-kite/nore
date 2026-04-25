@@ -9,6 +9,7 @@ import {
   X,
   RotateCcw
 } from 'lucide-react'
+import { codeToKey } from '../nore-app'
 import type { NoreState, AccentColor, FontSize } from '../nore-app'
 
 interface SettingsScreenProps {
@@ -84,14 +85,15 @@ function formatShortcut(shortcut: string, isMac: boolean): string {
 }
 
 function keyEventToShortcut(e: KeyboardEvent): string | null {
-  const key = e.key
-  if (['Control', 'Meta', 'Shift', 'Alt'].includes(key)) return null
+  if (['Control', 'Meta', 'Shift', 'Alt'].includes(e.key)) return null
+  // Use e.code to get the physical key, then convert to English name
+  const englishKey = codeToKey(e.code)
+  if (!englishKey) return null
   const parts: string[] = []
   if (e.ctrlKey || e.metaKey) parts.push('CmdOrCtrl')
   if (e.shiftKey) parts.push('Shift')
   if (e.altKey) parts.push('Alt')
-  const normalizedKey = key.length === 1 ? key.toUpperCase() : key
-  parts.push(normalizedKey)
+  parts.push(englishKey.length === 1 ? englishKey.toUpperCase() : englishKey)
   if (parts.length < 2) return null
   return parts.join('+')
 }

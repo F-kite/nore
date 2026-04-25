@@ -13,6 +13,13 @@ export interface LLMChatMessage {
   content: string
 }
 
+export interface ChatAttachment {
+  name: string
+  type: 'text' | 'image'
+  content: string
+  mimeType?: string
+}
+
 export interface NoteRecord {
   id: string
   filePath: string
@@ -58,6 +65,10 @@ declare global {
       selectFolder: () => Promise<string | null>
       getSavedPath: () => Promise<string | null>
       loadFiles: (vaultPath: string) => Promise<VaultFile[]>
+      getDefaultDbPath: () => string
+      selectDbFolder: () => Promise<string | null>
+      setDbPath: (dbPath: string) => void
+
     }
     indexing: {
       start: (vaultPath: string, files: VaultFile[]) => Promise<void>
@@ -79,8 +90,15 @@ declare global {
       remove: (keyName: 'embeddings' | 'llm') => Promise<void>
     }
     llm: {
-      chat: (params: { chatId: string; messages: LLMChatMessage[]; contextNotes: string }) => Promise<void>
+      chat: (params: {
+        chatId: string
+        messages: LLMChatMessage[]
+        contextNotes: string
+        model?: string
+        attachments?: ChatAttachment[]
+      }) => Promise<void>
       onToken: (callback: (data: { chatId: string; token: string }) => void) => void
+      fetchModels: () => Promise<string[]>
       checkConnection: () => Promise<{ ok: boolean; error?: string }>
       getConnections: () => Promise<LLMConnection[]>
       addConnection: (conn: Omit<LLMConnection, 'id'>, apiKey: string) => Promise<LLMConnection>
@@ -99,4 +117,4 @@ declare global {
   }
 }
 
-export {}
+export { }
