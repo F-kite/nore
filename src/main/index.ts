@@ -20,8 +20,8 @@ import {
 } from './settings'
 import type { LLMConnection } from './settings'
 import { indexVault, getProgress, searchNotes } from './indexer'
-import { streamChat } from './llm'
-import type { LLMChatMessage } from './llm'
+import { streamChat, fetchModels } from './llm'
+import type { LLMChatMessage, ChatAttachment } from './llm'
 import type { NoteFile } from '../types/indexer'
 
 console.log('[DEBUG] MISTRAL_API_KEY:', process.env.MISTRAL_API_KEY ? 'loaded' : 'NOT FOUND')
@@ -130,6 +130,8 @@ app.whenReady().then(() => {
     chatId: string
     messages: LLMChatMessage[]
     contextNotes: string
+    model?: string
+    attachments?: ChatAttachment[]
   }) => {
     await streamChat({
       ...params,
@@ -138,6 +140,9 @@ app.whenReady().then(() => {
       }
     })
   })
+
+  // Fetch available models for the active connection
+  ipcMain.handle('llm:fetchModels', async () => fetchModels())
 
   // LLM connection check (uses active connection)
   ipcMain.handle('llm:checkConnection', async (): Promise<{ ok: boolean; error?: string }> => {

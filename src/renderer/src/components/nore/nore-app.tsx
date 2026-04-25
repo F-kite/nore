@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { MessageCircle, PenLine, Settings, Search, Minus, Square, X } from 'lucide-react'
 import { ChatScreen } from './screens/chat-screen'
 import { WriteScreen } from './screens/write-screen'
@@ -54,7 +54,59 @@ export interface NoreState {
   selectedNoteForWrite: { title: string; content: string } | null
 }
 
+/** Map a shortcut key name (e.g. "T", "1", ",") to the expected e.code */
+function keyToCode(key: string): string {
+  if (key.length === 1) {
+    const upper = key.toUpperCase()
+    if (upper >= 'A' && upper <= 'Z') return `Key${upper}`
+    if (upper >= '0' && upper <= '9') return `Digit${upper}`
+  }
+  const special: Record<string, string> = {
+    ',': 'Comma', '.': 'Period', '/': 'Slash', ';': 'Semicolon',
+    "'": 'Quote', '[': 'BracketLeft', ']': 'BracketRight',
+    '\\': 'Backslash', '-': 'Minus', '=': 'Equal', '`': 'Backquote',
+    Escape: 'Escape', Enter: 'Enter', Tab: 'Tab', Space: 'Space',
+    Backspace: 'Backspace', Delete: 'Delete',
+    ArrowUp: 'ArrowUp', ArrowDown: 'ArrowDown',
+    ArrowLeft: 'ArrowLeft', ArrowRight: 'ArrowRight',
+  }
+  return special[key] ?? key
+}
+
+/** Reverse map: e.code → English key name for display/storage */
+export function codeToKey(code: string): string | null {
+  if (code.startsWith('Key')) return code.slice(3) // KeyT → T
+  if (code.startsWith('Digit')) return code.slice(5) // Digit1 → 1
+  const reverse: Record<string, string> = {
+    Comma: ',', Period: '.', Slash: '/', Semicolon: ';',
+    Quote: "'", BracketLeft: '[', BracketRight: ']',
+    Backslash: '\\', Minus: '-', Equal: '=', Backquote: '`',
+    Escape: 'Escape', Enter: 'Enter', Tab: 'Tab', Space: 'Space',
+    Backspace: 'Backspace', Delete: 'Delete',
+    ArrowUp: 'ArrowUp', ArrowDown: 'ArrowDown',
+    ArrowLeft: 'ArrowLeft', ArrowRight: 'ArrowRight',
+  }
+  return reverse[code] ?? null
+}
+
+function matchesShortcut(e: KeyboardEvent, shortcut: string): boolean {
+  const parts = shortcut.split('+')
+  const key = parts[parts.length - 1]
+  const needsMod = parts.includes('CmdOrCtrl')
+  const needsShift = parts.includes('Shift')
+  const needsAlt = parts.includes('Alt')
+
+  if (needsMod && !(e.ctrlKey || e.metaKey)) return false
+  if (!needsMod && (e.ctrlKey || e.metaKey)) return false
+  if (needsShift !== e.shiftKey) return false
+  if (needsAlt !== e.altKey) return false
+  return e.code === keyToCode(key)
+}
+
 export function NoreApp() {
+  const [shortcuts, setShortcuts] = useState<Record<string, string>>({})
+  const newChatRef = useRef<(() => void) | null>(null)
+
   const [state, setState] = useState<NoreState>({
     loading: true,
     isOnboarded: false,
@@ -112,6 +164,14 @@ export function NoreApp() {
 
     init()
 
+    // Load shortcuts from settings
+    Promise.all([
+      window.settings.get(),
+      window.settings.getDefaultShortcuts()
+    ]).then(([settings, defaults]) => {
+      setShortcuts({ ...defaults, ...settings.shortcuts })
+    }).catch(() => {})
+
     // Listen to indexing progress updates from main process
     window.indexing.onProgress((progress) => {
       setState((s) => ({
@@ -166,41 +226,41 @@ export function NoreApp() {
     document.documentElement.style.fontSize = fontSizes[state.fontSize]
   }, [state.fontSize])
 
-  // Keyboard shortcuts (only when onboarded)
+  // Keyboard shortcuts (dynamic, from settings)
   useEffect(() => {
     if (!state.isOnboarded) return
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      const isMod = e.metaKey || e.ctrlKey
-
-      if (isMod && e.key === 'k') {
-        e.preventDefault()
-        setState((s) => ({ ...s, searchOpen: true }))
-      }
-      if (isMod && e.key === '1') {
-        e.preventDefault()
-        setState((s) => ({ ...s, screen: 'chat' }))
-      }
-      if (isMod && e.key === '2') {
-        e.preventDefault()
-        setState((s) => ({ ...s, screen: 'write' }))
-      }
-      if (isMod && e.key === ',') {
-        e.preventDefault()
-        setState((s) => ({ ...s, screen: 'settings' }))
-      }
-      if (isMod && e.shiftKey && e.key === 'L') {
-        e.preventDefault()
-        setState((s) => ({ ...s, showLineNumbers: !s.showLineNumbers }))
-      }
       if (e.key === 'Escape' && state.searchOpen) {
         setState((s) => ({ ...s, searchOpen: false }))
+        return
+      }
+
+      const actions: Record<string, () => void> = {
+        searchNotes: () => setState((s) => ({ ...s, searchOpen: true })),
+        switchChat: () => setState((s) => ({ ...s, screen: 'chat' })),
+        switchWrite: () => setState((s) => ({ ...s, screen: 'write' })),
+        openSettings: () => setState((s) => ({ ...s, screen: 'settings' })),
+        toggleLineNumbers: () => setState((s) => ({ ...s, showLineNumbers: !s.showLineNumbers })),
+        newChat: () => {
+          setState((s) => ({ ...s, screen: 'chat' }))
+          newChatRef.current?.()
+        },
+      }
+
+      for (const [actionId, handler] of Object.entries(actions)) {
+        const shortcut = shortcuts[actionId]
+        if (shortcut && matchesShortcut(e, shortcut)) {
+          e.preventDefault()
+          handler()
+          return
+        }
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [state.isOnboarded, state.searchOpen])
+  }, [state.isOnboarded, state.searchOpen, shortcuts])
 
   const setScreen = useCallback((screen: Screen) => {
     setState((s) => ({ ...s, screen }))
@@ -258,7 +318,7 @@ export function NoreApp() {
       <div className="flex h-screen w-screen flex-col overflow-hidden bg-nore-base">
         {/* Top Bar — draggable window chrome */}
         <header
-          className="grid h-12 shrink-0 grid-cols-[1fr_auto_1fr] items-center border-b border-nore-border bg-nore-surface"
+          className="grid h-12 shrink-0 select-none grid-cols-[1fr_auto_1fr] items-center border-b border-nore-border bg-nore-surface"
           style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
         >
           {/* Left col: macOS spacer + Logo */}
@@ -283,7 +343,7 @@ export function NoreApp() {
                   key={screen}
                   onClick={() => setScreen(screen)}
                   style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-                  className={`relative flex items-center gap-2 px-4 py-3 text-sm transition-colors ${
+                  className={`relative flex items-center gap-2 px-4 py-3 text-sm transition-colors cursor-pointer ${
                     isActive ? 'text-(--nore-accent)' : 'text-nore-text-secondary hover:text-nore-text-primary'
                   }`}
                 >
@@ -302,7 +362,7 @@ export function NoreApp() {
             <button
               onClick={openSearch}
               style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-              className="flex flex-1 min-w-24 max-w-80 items-center gap-2 rounded-md border border-nore-border bg-nore-base px-2.5 py-1.5 text-sm text-nore-text-secondary transition-colors hover:border-nore-border-hover hover:text-nore-text-primary"
+              className="flex flex-1 min-w-24 max-w-80 items-center gap-2 rounded-md border border-nore-border bg-nore-base cursor-pointer px-2.5 py-1.5 text-sm text-nore-text-secondary transition-colors hover:border-nore-border-hover hover:text-nore-text-primary"
             >
               <Search className="h-3.5 w-3.5" />
               <span>Search</span>
@@ -330,17 +390,7 @@ export function NoreApp() {
               </TooltipContent>
             </Tooltip>
 
-            <div
-              style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-              className="flex shrink-0 items-center gap-2 text-xs text-nore-text-secondary"
-            >
-              <div className={`h-2 w-2 rounded-full ${
-                state.indexStatus === 'up-to-date' ? 'bg-green-500'
-                  : state.indexStatus === 'indexing' ? 'animate-pulse bg-amber-500'
-                    : 'bg-red-500'
-              }`} />
-              <span>{state.noteCount} notes</span>
-            </div>
+            
 
             {/* Windows/Linux: custom window controls */}
             {!isMac && (
@@ -384,6 +434,7 @@ export function NoreApp() {
               noteCount={state.noteCount}
               tagCount={state.tagCount}
               backlinkCount={state.backlinkCount}
+              indexStatus={state.indexStatus}
               lastIndexed={state.lastIndexed}
               onOpenInWrite={(note) => {
                 setState((s) => ({
@@ -392,6 +443,7 @@ export function NoreApp() {
                   selectedNoteForWrite: { title: note.title, content: note.content }
                 }))
               }}
+              newChatRef={newChatRef}
             />
           </div>
           <div
