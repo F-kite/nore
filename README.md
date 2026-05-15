@@ -4,11 +4,9 @@
 ### Your second brain, finally thinking back.
 
 <!-- ![App Demo](./assets/demo.gif) -->
-<!-- Замени на реальный GIF после Фазы 3 -->
 
 <!-- [![Download](https://img.shields.io/badge/Download-v0.1.0-blue?style=for-the-badge)](https://github.com/F-kite/nore/releases)
 [![License](https://img.shields.io/badge/Core-MIT-green?style=for-the-badge)](./LICENSE)
-[![License Pro](https://img.shields.io/badge/Pro-Proprietary-red?style=for-the-badge)](./LICENSE-PRO)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS-lightgrey?style=for-the-badge)](https://github.com/F-kite/nore/releases) -->
 
 </div>
@@ -28,8 +26,8 @@ You forget what you wrote six months ago. You miss connections between ideas. Yo
 Nore is a desktop AI thinking partner that sits on top of your Obsidian vault — proactively surfaces connections your vault already contains, and helps you think, not just retrieve.
 
 - **Ask** — Chat with your entire vault. Get answers that connect notes across time and show how your thinking has evolved, not just keyword matches.
-- **Write** — Open any note and Nore's sidebar surfaces related ideas, forgotten connections, and gaps in your thinking in real time. *(Pro)*
-- **Search the web in context** — Nore searches the web and filters results through what you already know. *(Pro)*
+- **Write** — Open any note and Nore's sidebar surfaces related ideas, forgotten connections, and gaps in your thinking in real time.
+- **Search the web in context** — Nore searches the web and filters results through what you already know.
 
 **Your data stays on your device.** Nore reads your local vault files directly. Nothing is uploaded to any server. Ever.
 
@@ -38,10 +36,10 @@ Nore is a desktop AI thinking partner that sits on top of your Obsidian vault �
 ## Demo
 Coming soon
 <!-- ![Ask Mode Demo](./assets/demo-ask.gif) -->
-<!-- Замени на реальное демо режима "Спроси" -->
+<!-- Заменить на реальное демо режима "Спроси" -->
 
 <!-- ![Write Mode Demo](./assets/demo-write.gif) -->
-<!-- Замени на реальное демо режима "Пиши" -->
+<!-- Заменить на реальное демо режима "Пиши" -->
 
 ---
 
@@ -83,23 +81,6 @@ Go to the [Releases](https://github.com/F-kite/nore/releases) page and download 
 
 ---
 
-## Pricing
-
-Nore follows an **open-core model** — the core is free and open-source forever. Pro features are paid.
-
-| | Free | Pro |
-|---|---|---|
-| Connect vault & indexing | ✅ | ✅ |
-| Ask mode | 50 queries/month | Unlimited |
-| Write mode (proactive sidebar) | ❌ | ✅ |
-| Web search in context | ❌ | ✅ |
-| Timeline — evolution of thinking | ❌ | ✅ |
-| Price | $0 | $10/month |
-
-[→ Download free](https://usenore.com) · [→ Get Pro](https://usenore.com#pro)
-
----
-
 ## Roadmap
 
 ### v0.1.0 — Current
@@ -108,9 +89,9 @@ Nore follows an **open-core model** — the core is free and open-source forever
 - [x] Ask mode — semantic chat with your vault
 
 ### v0.2.0 — Planned
-- [ ] Write mode — proactive sidebar *(Pro)*
-- [ ] Web search integration via Perplexity Sonar *(Pro)*
-- [ ] Timeline view — visualize how your thinking evolved *(Pro)*
+- [ ] Write mode — proactive sidebar 
+- [ ] Web search integration via Perplexity Sonar 
+- [ ] Timeline view — visualize how your thinking evolved 
 
 ### v0.3.0 — Exploring
 - [ ] Notion integration
@@ -124,8 +105,6 @@ Have a feature idea? [Open an issue →](https://github.com/F-kite/nore/issues/n
 ## Open-core Model
 
 Nore's core is open-source under the MIT license. This includes vault connection, indexing, and basic Ask mode.
-
-Pro features (Write mode, web search, Timeline) are proprietary and require a subscription. See [LICENSE](./LICENSE) and [LICENSE-PRO](./LICENSE-PRO) for details.
 
 ---
 
@@ -154,7 +133,7 @@ Nore is built on a simple principle: **your knowledge is yours.**
 - [LanceDB](https://lancedb.github.io/lancedb/) — Local vector database
 - [Voyage AI](https://www.voyageai.com/) — Embeddings
 - [OpenAI](https://openai.com/) — Language model
-- [Perplexity Sonar](https://www.perplexity.ai/) — Web search *(Pro)*
+- [Perplexity Sonar](https://www.perplexity.ai/) — Web search
 
 ---
 
