@@ -1,5 +1,5 @@
 
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import {
   RefreshCw, ExternalLink, Bold, Italic, Heading, LinkIcon,
   Code, FileText, ChevronDown, ChevronRight, Folder
@@ -133,12 +133,25 @@ function TreeItem({
 // --- Search helpers ---
 
 function extractSearchQuery(content: string): string {
-  const lines = content.split("\n")
+  // Strip frontmatter
+  const stripped = content.replace(/^---[\s\S]*?---\n?/, "").trim()
+  const lines = stripped.split("\n")
+
+  // All headings (topic signals)
   const headings = lines
     .filter((l) => /^#{1,3}\s/.test(l))
     .map((l) => l.replace(/^#+\s+/, "").trim())
-  const firstPara = lines.find((l) => l.trim() && !l.startsWith("#")) ?? ""
-  return [...headings, firstPara].filter(Boolean).join(" ").slice(0, 500)
+
+  // Substantial body lines (skip bullets, short lines, empty lines)
+  const bodyLines = lines
+    .filter((l) => {
+      const t = l.trim()
+      return t.length > 30 && !t.startsWith("#") && !t.startsWith("!") && !t.startsWith("|")
+    })
+    .slice(0, 5)
+    .map((l) => l.trim())
+
+  return [...headings, ...bodyLines].filter(Boolean).join(" ").slice(0, 600)
 }
 
 function noteToRelated(note: NoteRecord): RelatedNote {
@@ -203,10 +216,13 @@ export function WriteScreen({ showLineNumbers, initialNote }: WriteScreenProps) 
   const [activePanel, setActivePanel] = useState<"connections" | "vault">("connections")
 
   const [isSearching, setIsSearching] = useState(false)
-  const [relatedNotes, setRelatedNotes] = useState<RelatedNote[]>([])
-  const [refreshTick, setRefreshTick] = useState(0)
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [rawResults, setRawResults] = useState<NoteRecord[]>([])
+  const [threshold, setThreshold] = useState(65)
+  const [lastSearchQuery, setLastSearchQuery] = useState("")
+  const contentRef = useRef(content)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  useEffect(() => { contentRef.current = content }, [content])
 
   // Auto-grow textarea to content height — outer container scrolls, not the textarea
   useEffect(() => {
@@ -237,39 +253,43 @@ export function WriteScreen({ showLineNumbers, initialNote }: WriteScreenProps) 
     loadTree()
   }, [])
 
-  // Search related notes (debounced)
-  useEffect(() => {
-    if (!content.trim()) { setRelatedNotes([]); return }
-    if (debounceRef.current) clearTimeout(debounceRef.current)
-    debounceRef.current = setTimeout(async () => {
-      setIsSearching(true)
-      try {
-        const query = extractSearchQuery(content)
-        if (!query.trim()) return
-        const results: NoteRecord[] = await window.search.query(query)
-        const currentTitle = fileName.replace(/\.md$/, "").toLowerCase()
-        const filtered = results
-          .map(noteToRelated)
-          .filter((n) => n.title.toLowerCase() !== currentTitle && n.score >= 50)
-          .slice(0, 6)
-        setRelatedNotes(filtered)
-      } catch {
-        // search unavailable
-      } finally {
-        setIsSearching(false)
-      }
-    }, 1500)
-    return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
-  }, [content, fileName, refreshTick])
+  // Filtered notes computed from raw results + threshold (no API call)
+  const currentTitle = fileName.replace(/\.md$/, "").toLowerCase()
+  const relatedNotes = useMemo(() =>
+    rawResults
+      .map(noteToRelated)
+      .filter((n) => n.title.toLowerCase() !== currentTitle && n.score >= threshold),
+    [rawResults, threshold, currentTitle]
+  )
 
-  const handleRefresh = useCallback(() => setRefreshTick((t) => t + 1), [])
+  // Manual search — called by the refresh button or when a note is opened
+  const searchConnections = useCallback(async () => {
+    const current = contentRef.current
+    if (!current.trim()) { setRawResults([]); setLastSearchQuery(""); return }
+    const query = extractSearchQuery(current)
+    if (!query.trim()) return
+    setLastSearchQuery(query)
+    setIsSearching(true)
+    try {
+      const results: NoteRecord[] = await window.write.relatedOnly(query, 30)
+      setRawResults(results)
+    } catch {
+      // search unavailable
+    } finally {
+      setIsSearching(false)
+    }
+  }, [])
+
+  const handleRefresh = useCallback(() => searchConnections(), [searchConnections])
 
   const handleSelectVaultNote = useCallback((file: VaultFile) => {
+    contentRef.current = file.content  // update ref immediately before searching
     setContent(file.content)
     setFileName(file.name)
     setActiveNotePath(file.relativePath)
     setActivePanel("connections")
-  }, [])
+    searchConnections()
+  }, [searchConnections])
 
   // Resize
   const handleMouseDown = () => setIsResizing(true)
@@ -386,69 +406,93 @@ export function WriteScreen({ showLineNumbers, initialNote }: WriteScreenProps) 
               ))}
             </div>
             {activePanel === "connections" && (
-              <button
-                onClick={handleRefresh}
-                className="rounded p-1 text-nore-text-secondary hover:bg-nore-elevated hover:text-nore-text-primary transition-colors"
-                title="Refresh connections"
-              >
-                <RefreshCw className={`h-3.5 w-3.5 ${isSearching ? "animate-spin" : ""}`} />
-              </button>
+              <div className="flex items-center gap-2">
+                {relatedNotes.length > 0 && (
+                  <span className="text-xs text-nore-text-tertiary">{relatedNotes.length} found</span>
+                )}
+                <button
+                  onClick={handleRefresh}
+                  disabled={isSearching}
+                  className="rounded p-1 text-nore-text-secondary hover:bg-nore-elevated hover:text-nore-text-primary transition-colors disabled:opacity-40"
+                  title="Find connections"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${isSearching ? "animate-spin" : ""}`} />
+                </button>
+              </div>
             )}
           </div>
 
           {/* Connections tab */}
           {activePanel === "connections" && (
-            <div className="flex-1 overflow-y-auto scrollbar-thin px-4 py-4">
-              {!content.trim() ? (
-                <p className="pt-8 text-center text-sm text-nore-text-tertiary">
-                  Start writing to see connections...
-                </p>
-              ) : isSearching ? (
-                <div className="space-y-4">
-                  {[1, 2, 3].map((i) => (
-                    <div key={i} className="animate-pulse space-y-2">
-                      <div className="h-4 w-3/4 rounded bg-nore-elevated" />
-                      <div className="h-3 w-1/4 rounded bg-nore-elevated" />
-                      <div className="h-3 w-full rounded bg-nore-elevated" />
-                    </div>
-                  ))}
-                </div>
-              ) : relatedNotes.length === 0 ? (
-                <p className="pt-4 text-sm text-nore-text-tertiary">
-                  No related notes found in vault
-                </p>
-              ) : (
-                <div className="space-y-2">
-                  {relatedNotes.map((note, i) => (
-                    <div
-                      key={i}
-                      className="group cursor-pointer rounded-md border border-nore-border bg-nore-base p-3 hover:border-nore-border-hover transition-colors"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2">
-                            <p className="truncate text-sm font-medium text-nore-text-primary group-hover:text-(--nore-accent) transition-colors">
-                              {note.title}
-                            </p>
-                            <span className="shrink-0 rounded bg-nore-elevated px-1.5 py-0.5 text-xs text-nore-text-secondary">
-                              {note.score}%
-                            </span>
+            <div className="flex flex-col flex-1 overflow-hidden">
+              {/* Threshold slider */}
+              <div className="flex items-center gap-2 border-b border-nore-border px-4 py-2 shrink-0">
+                <span className="text-xs text-nore-text-tertiary whitespace-nowrap">Min match</span>
+                <input
+                  type="range"
+                  min={20}
+                  max={90}
+                  step={5}
+                  value={threshold}
+                  onChange={(e) => setThreshold(Number(e.target.value))}
+                  className="flex-1 accent-(--nore-accent)"
+                />
+                <span className="w-8 shrink-0 text-right text-xs text-nore-text-secondary">{threshold}%</span>
+              </div>
+
+              <div className="flex-1 overflow-y-auto scrollbar-thin px-4 py-4">
+                {!lastSearchQuery && !isSearching ? (
+                  <p className="pt-8 text-center text-sm text-nore-text-tertiary">
+                    Open a note or click <RefreshCw className="inline h-3 w-3" /> to find connections
+                  </p>
+                ) : relatedNotes.length === 0 && !isSearching ? (
+                  <p className="pt-4 text-sm text-nore-text-tertiary">
+                    No notes above {threshold}% similarity
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {relatedNotes.map((note, i) => (
+                      <Tooltip key={i}>
+                        <TooltipTrigger asChild>
+                          <div className="group rounded-md border border-nore-border bg-nore-base p-3 hover:border-nore-border-hover transition-colors">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-2">
+                                  <p className="truncate text-sm font-medium text-nore-text-primary group-hover:text-(--nore-accent) transition-colors">
+                                    {note.title}
+                                  </p>
+                                  <span className="shrink-0 rounded bg-nore-elevated px-1.5 py-0.5 text-xs text-nore-text-secondary">
+                                    {note.score}%
+                                  </span>
+                                </div>
+                                {note.excerpt && (
+                                  <p className="mt-1 line-clamp-1 text-xs text-nore-text-secondary">
+                                    {note.excerpt}
+                                  </p>
+                                )}
+                                <p className="mt-0.5 truncate font-mono text-xs text-nore-text-tertiary">
+                                  {note.path}
+                                </p>
+                              </div>
+                              <button
+                                onClick={() => window.vault.openInObsidian(note.path).catch(() => {})}
+                                title="Open in Obsidian"
+                                className="shrink-0 cursor-pointer text-nore-text-tertiary opacity-0 transition-opacity group-hover:opacity-100 hover:text-(--nore-accent)"
+                              >
+                                <ExternalLink className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
                           </div>
-                          {note.excerpt && (
-                            <p className="mt-1 line-clamp-1 text-xs text-nore-text-secondary">
-                              {note.excerpt}
-                            </p>
-                          )}
-                          <p className="mt-0.5 truncate font-mono text-xs text-nore-text-tertiary">
-                            {note.path}
-                          </p>
-                        </div>
-                        <ExternalLink className="h-3.5 w-3.5 shrink-0 text-nore-text-tertiary opacity-0 group-hover:opacity-100 transition-opacity" />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+                        </TooltipTrigger>
+                        <TooltipContent side="left" className="max-w-56 bg-nore-elevated border-nore-border text-nore-text-primary">
+                          <p className="text-xs text-nore-text-tertiary mb-0.5">Found via query:</p>
+                          <p className="text-xs">{lastSearchQuery.slice(0, 120)}</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           )}
 

@@ -9,7 +9,8 @@ import {
   getSavedVaultPath,
   getDefaultDbPath,
   setDbPath,
-  loadVaultFiles
+  loadVaultFiles,
+  openInObsidian
 } from './vault'
 import icon from '../../resources/icon.png?asset'
 import {
@@ -20,9 +21,26 @@ import {
 } from './settings'
 import type { LLMConnection } from './settings'
 import { indexVault, getProgress, searchNotes } from './indexer'
+import {
+  listConversations,
+  loadConversation,
+  saveConversation,
+  deleteConversation,
+  renameConversation,
+  type StoredChat
+} from './conversations'
 import { streamChat, fetchModels } from './llm'
 import type { LLMChatMessage, ChatAttachment } from './llm'
 import type { NoteFile } from '../types/indexer'
+import {
+  getStatus as getLicenseStatus,
+  activate as activateLicense,
+  deactivate as deactivateLicense,
+  isQueryAllowed,
+  incrementQueryCount,
+  validateInBackground,
+  onStatusChange as onLicenseStatusChange
+} from './license'
 
 console.log('[DEBUG] MISTRAL_API_KEY:', process.env.MISTRAL_API_KEY ? 'loaded' : 'NOT FOUND')
 
@@ -100,6 +118,10 @@ app.whenReady().then(() => {
     return await loadVaultFiles(vaultPath)
   })
 
+  ipcMain.handle('vault:openInObsidian', async (_, notePath: string) => {
+    await openInObsidian(notePath)
+  })
+
   // Indexing IPC
   ipcMain.handle('indexing:start', async (_, vaultPath: string, files: NoteFile[]) => {
     console.log(`[DEBUG] indexing:start called; \npath:${vaultPath};\n files_count:${files?.length}`)
@@ -117,6 +139,18 @@ app.whenReady().then(() => {
     return await searchNotes(query)
   })
 
+  // Chat IPC — conversation persistence (SQLite)
+  ipcMain.handle('chat:listConversations', () => listConversations())
+  ipcMain.handle('chat:loadConversation', (_, id: string) => loadConversation(id))
+  ipcMain.handle('chat:saveConversation', (_, chat: StoredChat) => saveConversation(chat))
+  ipcMain.handle('chat:deleteConversation', (_, id: string) => deleteConversation(id))
+  ipcMain.handle('chat:renameConversation', (_, id: string, title: string) => renameConversation(id, title))
+
+  // Write IPC — vector search for related notes
+  ipcMain.handle('write:relatedOnly', async (_, query: string, limit = 6) => {
+    return await searchNotes(query, limit)
+  })
+
   // Window controls IPC (frameless window)
   ipcMain.on('window:minimize', () => mainWindow?.minimize())
   ipcMain.on('window:toggleMaximize', () => {
@@ -125,20 +159,44 @@ app.whenReady().then(() => {
   })
   ipcMain.on('window:close', () => mainWindow?.close())
 
+  // License IPC
+  ipcMain.handle('license:getStatus', () => getLicenseStatus())
+  ipcMain.handle('license:activate', async (_, email: string, key: string) =>
+    activateLicense(email, key)
+  )
+  ipcMain.handle('license:deactivate', () => deactivateLicense())
+
+  // Forward license status changes to renderer
+  onLicenseStatusChange((status) => {
+    BrowserWindow.getAllWindows()[0]?.webContents.send('license:statusChange', status)
+  })
+
+  // Background validation on startup (non-blocking)
+  validateInBackground().catch(() => {})
+
   // LLM IPC (streaming)
   ipcMain.handle('llm:chat', async (event, params: {
     chatId: string
     messages: LLMChatMessage[]
-    contextNotes: string
     model?: string
     attachments?: ChatAttachment[]
   }) => {
+    const queryCheck = isQueryAllowed()
+    if (!queryCheck.allowed) {
+      throw new Error(queryCheck.reason)
+    }
+
     await streamChat({
       ...params,
       onToken: (token) => {
         event.sender.send('llm:token', { chatId: params.chatId, token })
+      },
+      onSources: (sources) => {
+        event.sender.send('llm:sources', { chatId: params.chatId, sources })
       }
     })
+
+    incrementQueryCount()
   })
 
   // Fetch available models for the active connection

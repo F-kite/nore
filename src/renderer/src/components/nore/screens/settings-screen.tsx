@@ -7,10 +7,13 @@ import {
   Eye,
   EyeOff,
   X,
-  RotateCcw
+  RotateCcw,
+  Crown,
+  Zap
 } from 'lucide-react'
 import { codeToKey } from '../nore-app'
 import type { NoreState, AccentColor, FontSize } from '../nore-app'
+import type { LicenseStatus } from '../../../../../types/index.d'
 
 interface SettingsScreenProps {
   state: NoreState
@@ -137,23 +140,35 @@ export function SettingsScreen({ state, onUpdate }: SettingsScreenProps) {
   // Platform
   const [isMac, setIsMac] = useState(false)
 
+  // License / Account state
+  const [licenseStatus, setLicenseStatus] = useState<LicenseStatus | null>(null)
+  const [showActivateForm, setShowActivateForm] = useState(false)
+  const [activateEmail, setActivateEmail] = useState('')
+  const [activateKey, setActivateKey] = useState('')
+  const [showActivateKey, setShowActivateKey] = useState(false)
+  const [activating, setActivating] = useState(false)
+  const [activateError, setActivateError] = useState<string | null>(null)
+  const [deactivating, setDeactivating] = useState(false)
+
   useEffect(() => {
     async function load() {
       try {
         setIsMac(window.platform?.isMac ?? false)
         const settings = await window.settings.get()
         setShortcuts(settings.shortcuts || {})
-        const [defaults, hasEmb, embMasked, conns] = await Promise.all([
+        const [defaults, hasEmb, embMasked, conns, licStatus] = await Promise.all([
           window.settings.getDefaultShortcuts(),
           window.apiKeys.has('embeddings'),
           window.apiKeys.getMasked('embeddings'),
-          window.llm.getConnections()
+          window.llm.getConnections(),
+          window.license.getStatus()
         ])
         setDefaultShortcuts(defaults)
         setHasEmbeddingsKey(hasEmb)
         setEmbeddingsKeyMasked(embMasked)
         setConnections(conns)
         setActiveConnectionId(settings.activeLlmConnectionId ?? null)
+        setLicenseStatus(licStatus)
         const masked = await Promise.all(conns.map(async (c) => [c.id, await window.llm.getMaskedConnectionKey(c.id)] as const))
         setMaskedKeys(Object.fromEntries(masked))
       } catch (err) {
@@ -161,6 +176,7 @@ export function SettingsScreen({ state, onUpdate }: SettingsScreenProps) {
       }
     }
     load()
+    window.license.onStatusChange(setLicenseStatus)
   }, [])
 
   useEffect(() => {
@@ -288,6 +304,23 @@ export function SettingsScreen({ state, onUpdate }: SettingsScreenProps) {
       setFormBaseUrl('')
     } finally {
       setFormSaving(false)
+    }
+  }
+
+  const handleActivate = async () => {
+    if (!activateEmail.trim() || !activateKey.trim()) return
+    setActivating(true)
+    setActivateError(null)
+    try {
+      const status = await window.license.activate(activateEmail.trim(), activateKey.trim())
+      setLicenseStatus(status)
+      setShowActivateForm(false)
+      setActivateEmail('')
+      setActivateKey('')
+    } catch (err) {
+      setActivateError((err as Error).message)
+    } finally {
+      setActivating(false)
     }
   }
 
@@ -705,6 +738,171 @@ export function SettingsScreen({ state, onUpdate }: SettingsScreenProps) {
               )
             })}
           </div>
+        </section>
+
+        <div className="mb-8 h-px bg-nore-border" />
+
+        {/* ===== ACCOUNT ===== */}
+        <section className="mb-8">
+          <h2 className="mb-4 text-xs font-medium uppercase tracking-wider text-nore-text-tertiary">
+            Account
+          </h2>
+
+          {licenseStatus ? (
+            <div className="space-y-4">
+              {/* Plan badge */}
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-nore-text-secondary">Plan</p>
+                <span
+                  className={`flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                    licenseStatus.plan === 'pro'
+                      ? 'bg-(--nore-accent-muted) text-(--nore-accent)'
+                      : 'bg-nore-elevated text-nore-text-tertiary'
+                  }`}
+                >
+                  {licenseStatus.plan === 'pro' ? (
+                    <Crown className="h-3 w-3" />
+                  ) : (
+                    <Zap className="h-3 w-3" />
+                  )}
+                  {licenseStatus.plan === 'pro' ? 'Pro' : 'Free'}
+                </span>
+              </div>
+
+              {/* Pro: email + valid until + deactivate */}
+              {licenseStatus.plan === 'pro' && (
+                <>
+                  {licenseStatus.email && (
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm text-nore-text-secondary">Email</p>
+                      <p className="text-sm text-nore-text-tertiary">{licenseStatus.email}</p>
+                    </div>
+                  )}
+                  {licenseStatus.validUntil && (
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm text-nore-text-secondary">Valid until</p>
+                      <p className="text-sm text-nore-text-tertiary">
+                        {new Date(licenseStatus.validUntil).toLocaleDateString([], {
+                          year: 'numeric',
+                          month: 'short',
+                          day: 'numeric'
+                        })}
+                      </p>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-nore-text-secondary">Queries this month</p>
+                      <p className="mt-0.5 text-xs text-nore-text-tertiary">Unlimited</p>
+                    </div>
+                    <button
+                      disabled={deactivating}
+                      onClick={async () => {
+                        if (!confirm('Deactivate your Pro license on this device?')) return
+                        setDeactivating(true)
+                        try {
+                          await window.license.deactivate()
+                          setShowActivateForm(false)
+                        } finally {
+                          setDeactivating(false)
+                        }
+                      }}
+                      className="rounded-md border border-nore-border bg-transparent px-3 py-1.5 text-sm text-nore-text-tertiary transition-colors cursor-pointer hover:border-red-500 hover:text-red-400 disabled:opacity-50"
+                    >
+                      {deactivating ? 'Deactivating...' : 'Deactivate'}
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {/* Free: usage bar + activate form */}
+              {licenseStatus.plan === 'free' && (
+                <>
+                  <div>
+                    <div className="mb-1.5 flex items-center justify-between">
+                      <p className="text-sm text-nore-text-secondary">Queries this month</p>
+                      <p className="text-xs text-nore-text-tertiary">
+                        {licenseStatus.queriesUsedThisMonth} / {licenseStatus.queriesLimit}
+                      </p>
+                    </div>
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-nore-elevated">
+                      <div
+                        className="h-full rounded-full transition-all"
+                        style={{
+                          width: `${Math.min(100, (licenseStatus.queriesUsedThisMonth / licenseStatus.queriesLimit) * 100)}%`,
+                          backgroundColor:
+                            licenseStatus.queriesUsedThisMonth >= licenseStatus.queriesLimit
+                              ? '#F43F5E'
+                              : 'var(--nore-accent)'
+                        }}
+                      />
+                    </div>
+                    {licenseStatus.queriesUsedThisMonth >= licenseStatus.queriesLimit && (
+                      <p className="mt-1.5 text-xs text-red-400">
+                        Monthly limit reached. Upgrade to Pro for unlimited queries.
+                      </p>
+                    )}
+                  </div>
+
+                  {!showActivateForm ? (
+                    <button
+                      onClick={() => { setShowActivateForm(true); setActivateError(null) }}
+                      className="rounded-md bg-(--nore-accent) px-3 py-1.5 text-sm text-white transition-opacity hover:opacity-90 cursor-pointer"
+                    >
+                      Activate Pro license
+                    </button>
+                  ) : (
+                    <div className="rounded-md border border-nore-border bg-nore-base p-4 space-y-3">
+                      <p className="text-sm font-medium text-nore-text-primary">Activate Pro</p>
+                      <input
+                        type="email"
+                        value={activateEmail}
+                        onChange={(e) => setActivateEmail(e.target.value)}
+                        placeholder="Email"
+                        className="w-full rounded-md border border-nore-border bg-nore-surface px-3 py-1.5 text-sm text-nore-text-primary outline-none focus:border-(--nore-accent) placeholder:text-nore-text-tertiary"
+                      />
+                      <div className="relative">
+                        <input
+                          type={showActivateKey ? 'text' : 'password'}
+                          value={activateKey}
+                          onChange={(e) => setActivateKey(e.target.value)}
+                          onKeyDown={(e) => e.key === 'Enter' && handleActivate()}
+                          placeholder="License key"
+                          className="w-full rounded-md border border-nore-border bg-nore-surface px-3 py-1.5 pr-8 text-sm font-mono text-nore-text-primary outline-none focus:border-(--nore-accent) placeholder:text-nore-text-tertiary"
+                        />
+                        <button
+                          onClick={() => setShowActivateKey((v) => !v)}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-nore-text-tertiary hover:text-nore-text-secondary"
+                        >
+                          {showActivateKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                        </button>
+                      </div>
+                      {activateError && (
+                        <p className="text-xs text-red-400">{activateError}</p>
+                      )}
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={handleActivate}
+                          disabled={activating || !activateEmail.trim() || !activateKey.trim()}
+                          className="rounded-md bg-(--nore-accent) px-3 py-1.5 text-sm text-white transition-opacity hover:opacity-90 disabled:opacity-50 cursor-pointer"
+                        >
+                          {activating ? 'Activating...' : 'Activate'}
+                        </button>
+                        <button
+                          onClick={() => { setShowActivateForm(false); setActivateError(null) }}
+                          className="text-sm text-nore-text-tertiary transition-colors hover:text-nore-text-primary cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          ) : (
+            <p className="text-sm text-nore-text-tertiary">Loading...</p>
+          )}
         </section>
 
         <div className="mb-8 h-px bg-nore-border" />

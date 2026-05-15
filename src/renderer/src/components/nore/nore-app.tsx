@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { MessageCircle, PenLine, Settings, Search, Minus, Square, X } from 'lucide-react'
+import { MessageCircle, PenLine, Settings, Search, Minus, Square, X, AlertTriangle } from 'lucide-react'
 import { ChatScreen } from './screens/chat-screen'
 import { WriteScreen } from './screens/write-screen'
 import { SettingsScreen } from './screens/settings-screen'
@@ -106,6 +106,8 @@ function matchesShortcut(e: KeyboardEvent, shortcut: string): boolean {
 export function NoreApp() {
   const [shortcuts, setShortcuts] = useState<Record<string, string>>({})
   const newChatRef = useRef<(() => void) | null>(null)
+  const [hasMistralKey, setHasMistralKey] = useState(true)
+  const [hasLlmConnections, setHasLlmConnections] = useState(true)
 
   const [state, setState] = useState<NoreState>({
     loading: true,
@@ -154,6 +156,14 @@ export function NoreApp() {
                 : progress.status === 'error' ? 'error'
                   : 'up-to-date'
           }))
+          // Check if API keys are configured for returning users
+          Promise.all([
+            window.apiKeys.has('embeddings'),
+            window.llm.getConnections()
+          ]).then(([hasEmb, conns]) => {
+            setHasMistralKey(hasEmb)
+            setHasLlmConnections(conns.length > 0)
+          }).catch(() => {})
         } else {
           setState((s) => ({ ...s, loading: false }))
         }
@@ -194,6 +204,22 @@ export function NoreApp() {
       }
     })
   }, [])
+
+  const checkApiKeys = useCallback(async () => {
+    try {
+      const [hasEmb, conns] = await Promise.all([
+        window.apiKeys.has('embeddings'),
+        window.llm.getConnections()
+      ])
+      setHasMistralKey(hasEmb)
+      setHasLlmConnections(conns.length > 0)
+    } catch { /* ignore */ }
+  }, [])
+
+  // Re-check keys whenever the user navigates away from settings (they may have added keys)
+  useEffect(() => {
+    if (state.isOnboarded) checkApiKeys()
+  }, [state.screen, state.isOnboarded, checkApiKeys])
 
   // Handle onboarding completion
   const handleOnboardingComplete = useCallback(
@@ -423,6 +449,27 @@ export function NoreApp() {
             )}
           </div>
         </header>
+
+        {/* API keys setup warning — shown when one or both keys are missing */}
+        {(!hasMistralKey || !hasLlmConnections) && (
+          <div className="flex shrink-0 items-center gap-2.5 border-b border-amber-500/25 bg-amber-500/10 px-4 py-2">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-400" />
+            <p className="flex-1 text-xs text-amber-300">
+              {!hasMistralKey && !hasLlmConnections
+                ? 'Mistral API key and AI model are not configured — search and chat are disabled.'
+                : !hasMistralKey
+                  ? 'Mistral API key is missing — semantic search is disabled.'
+                  : 'No AI model configured — chat is disabled.'}
+            </p>
+            <button
+              onClick={() => setScreen('settings')}
+              style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+              className="shrink-0 rounded px-2 py-0.5 text-xs text-amber-300 underline transition-colors hover:no-underline hover:text-amber-200 cursor-pointer"
+            >
+              Open Settings
+            </button>
+          </div>
+        )}
 
         {/* Main Content */}
         <main className="flex-1 overflow-hidden">

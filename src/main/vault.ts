@@ -1,4 +1,4 @@
-import { dialog, app } from 'electron'
+import { dialog, app, shell } from 'electron'
 import { readdir, readFile, stat } from 'fs/promises'
 import { join, extname, relative } from 'path'
 import Store from 'electron-store'
@@ -91,4 +91,14 @@ async function readMdFiles(dirPath: string, rootPath: string): Promise<VaultFile
 // Загрузить все файлы из vault
 export async function loadVaultFiles(vaultPath: string): Promise<VaultFile[]> {
   return await readMdFiles(vaultPath, vaultPath)
+}
+
+// Открыть заметку в Obsidian через URI scheme
+export async function openInObsidian(notePath: string): Promise<void> {
+  const vaultPath = getSavedVaultPath()
+  if (!vaultPath) throw new Error('No vault configured')
+  const vaultName = vaultPath.split(/[\\/]/).pop() ?? ''
+  const filePath = notePath.replace(/\\/g, '/')
+  const uri = `obsidian://open?vault=${encodeURIComponent(vaultName)}&file=${encodeURIComponent(filePath)}`
+  await shell.openExternal(uri)
 }
