@@ -1,6 +1,40 @@
 import type { ElectronAPI } from '@electron-toolkit/preload'
 import type { VaultFile } from '../types/vault'
 
+// --- Conversation persistence types ---
+
+export interface ConversationSummary {
+  id: string
+  title: string
+  createdAt: number
+  updatedAt: number
+  messageCount: number
+}
+
+export interface StoredVersion {
+  id: string
+  content: string
+  timestamp: string
+  sources?: unknown
+  error?: boolean
+}
+
+export interface StoredMessage {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  timestamp: string
+  versions?: StoredVersion[]
+  activeVersionIndex?: number
+}
+
+export interface StoredChat {
+  id: string
+  title: string
+  createdAt: number
+  messages: StoredMessage[]
+}
+
 export interface IndexingProgress {
   total: number
   processed: number
@@ -20,6 +54,14 @@ export interface ChatAttachment {
   mimeType?: string
 }
 
+export interface SearchSource {
+  title: string
+  relativePath: string
+  content: string
+  excerpt: string
+  _distance?: number
+}
+
 export interface NoteRecord {
   id: string
   filePath: string
@@ -30,6 +72,18 @@ export interface NoteRecord {
   modifiedAt: number
   _distance?: number
   vector: number[]
+}
+
+export type Plan = 'free' | 'pro'
+
+export interface LicenseStatus {
+  plan: Plan
+  email?: string
+  validUntil?: number
+  queriesUsedThisMonth: number
+  /** -1 means unlimited (Pro) */
+  queriesLimit: number
+  lastValidatedAt: number
 }
 
 export type LLMProvider = 'openai' | 'anthropic' | 'ollama' | 'lmstudio'
@@ -68,7 +122,7 @@ declare global {
       getDefaultDbPath: () => string
       selectDbFolder: () => Promise<string | null>
       setDbPath: (dbPath: string) => void
-
+      openInObsidian: (notePath: string) => Promise<void>
     }
     indexing: {
       start: (vaultPath: string, files: VaultFile[]) => Promise<void>
@@ -93,11 +147,11 @@ declare global {
       chat: (params: {
         chatId: string
         messages: LLMChatMessage[]
-        contextNotes: string
         model?: string
         attachments?: ChatAttachment[]
       }) => Promise<void>
       onToken: (callback: (data: { chatId: string; token: string }) => void) => void
+      onSources: (callback: (data: { chatId: string; sources: SearchSource[] }) => void) => void
       fetchModels: () => Promise<string[]>
       checkConnection: () => Promise<{ ok: boolean; error?: string }>
       getConnections: () => Promise<LLMConnection[]>
@@ -105,6 +159,22 @@ declare global {
       deleteConnection: (id: string) => Promise<void>
       setActiveConnection: (id: string) => Promise<void>
       getMaskedConnectionKey: (id: string) => Promise<string>
+    }
+    chat: {
+      listConversations: () => Promise<ConversationSummary[]>
+      loadConversation: (id: string) => Promise<StoredChat | null>
+      saveConversation: (chat: StoredChat) => Promise<void>
+      deleteConversation: (id: string) => Promise<void>
+      renameConversation: (id: string, title: string) => Promise<void>
+    }
+    write: {
+      relatedOnly: (query: string, limit?: number) => Promise<NoteRecord[]>
+    }
+    license: {
+      getStatus: () => Promise<LicenseStatus>
+      activate: (email: string, key: string) => Promise<LicenseStatus>
+      deactivate: () => Promise<void>
+      onStatusChange: (callback: (status: LicenseStatus) => void) => void
     }
     windowControls: {
       minimize: () => void

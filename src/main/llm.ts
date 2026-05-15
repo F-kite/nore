@@ -1,6 +1,7 @@
 import OpenAI from 'openai'
 import type { ChatCompletionMessageParam, ChatCompletionContentPart } from 'openai/resources/chat/completions'
 import { getActiveConnection, getConnectionApiKey, getLlmConnections } from './settings'
+import { searchNotes } from './indexer'
 
 // --- Types ---
 
@@ -16,14 +17,141 @@ export interface ChatAttachment {
   mimeType?: string // e.g. image/png
 }
 
+export interface SearchNoteSource {
+  title: string
+  relativePath: string
+  content: string
+  excerpt: string
+  _distance?: number
+}
+
 export interface StreamChatParams {
   chatId: string
   messages: LLMChatMessage[]
-  contextNotes: string
   model?: string // override connection's default model
   attachments?: ChatAttachment[]
   onToken: (token: string) => void
+  onSources?: (sources: SearchNoteSource[]) => void
 }
+
+// --- Intent check ---
+
+// --- Heuristic intent detection (fast, no API call) ---
+
+function heuristicIntent(
+  messages: LLMChatMessage[]
+): { verdict: 'no' | 'yes' | 'maybe'; query: string } {
+  const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user')?.content ?? ''
+  const lower = lastUserMsg.toLowerCase().trim()
+  const query = lastUserMsg.slice(0, 300)
+
+  // Clearly conversational — very short, no question mark, no semantic content
+  if (lower.length < 25 && !/[?]/.test(lower)) return { verdict: 'no', query }
+
+  // Greetings and social phrases
+  const noPatterns = [
+    /^(привет|здравствуй|добрый\s+(день|утро|вечер)|хай|хей|privet)/,
+    /^(hello|hi[\s,!]|hey[\s,!]|good\s+(morning|afternoon|evening))/,
+    /^(спасибо|благодарю|thanks|thank\s+you|ок|ok|хорошо|понял|ясно|понятно|отлично|супер|класс)/,
+    /^(пока|bye|до\s+свидания)/,
+  ]
+  if (noPatterns.some((r) => r.test(lower))) return { verdict: 'no', query }
+
+  // Explicit note-vault queries
+  const yesPatterns = [
+    /мои\s+заметки|my\s+notes|my\s+vault/,
+    /что\s+я\s+(писал|думал|заметил|записал|изучал)/,
+    /what\s+(did\s+i|have\s+i)\s+(written?|noted?|thought|studied)/,
+    /найди|поищи|покажи\s+мне|show\s+me|find\s+my/,
+    /в\s+моих\s+(заметках|записях)|из\s+(моих\s+)?(заметок|записей)/,
+    /из\s+базы\s+знаний|в\s+базе\s+знаний/,
+  ]
+  if (yesPatterns.some((r) => r.test(lower))) return { verdict: 'yes', query }
+
+  // Pure creative/code tasks with no reference to personal notes
+  const noCreativePattern = /^(напиши|создай|сгенерируй|write\s+me|generate|create)\s+(?!.*(мо[йеяих]|my\s+notes|заметк))/
+  if (noCreativePattern.test(lower) && lower.length < 120) return { verdict: 'no', query }
+
+  return { verdict: 'maybe', query }
+}
+
+const INTENT_PROMPT = `You are a search router. Decide if this message needs to search the user's personal notes vault.
+
+Respond ONLY with valid JSON: {"shouldSearch": true/false, "query": "optimized search terms"}
+
+SEARCH when message asks about: specific topics the user might have notes on, their past ideas/plans/writings, knowledge from their vault.
+DO NOT SEARCH for: casual chat, greetings, general knowledge questions, pure creative/coding tasks.`
+
+async function checkSearchIntent(
+  messages: LLMChatMessage[],
+  provider: string,
+  apiKey: string | null,
+  baseURL: string | undefined,
+  model: string
+): Promise<{ shouldSearch: boolean; query: string }> {
+  // Step 1: fast heuristic check (no API call)
+  const heuristic = heuristicIntent(messages)
+  if (heuristic.verdict === 'no') return { shouldSearch: false, query: '' }
+  if (heuristic.verdict === 'yes') return { shouldSearch: true, query: heuristic.query }
+
+  // Step 2: ambiguous — ask the LLM (fallback: search, because topic questions usually benefit from context)
+  const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user')?.content ?? ''
+  const fallback = { shouldSearch: true, query: lastUserMsg.slice(0, 300) }
+
+  try {
+    let text = ''
+    const userPrompt = `Message: "${lastUserMsg.slice(0, 500)}"`
+
+    if (provider === 'anthropic') {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey!,
+          'anthropic-version': '2023-06-01'
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: 80,
+          system: INTENT_PROMPT,
+          messages: [{ role: 'user', content: userPrompt }]
+        })
+      })
+      if (!res.ok) return fallback
+      const data = await res.json()
+      text = data.content?.[0]?.text ?? ''
+    } else {
+      const client = new OpenAI({ apiKey: apiKey ?? 'none', ...(baseURL ? { baseURL } : {}) })
+      const res = await client.chat.completions.create({
+        model,
+        max_tokens: 80,
+        temperature: 0,
+        messages: [
+          { role: 'system', content: INTENT_PROMPT },
+          { role: 'user', content: userPrompt }
+        ]
+      })
+      text = res.choices[0]?.message?.content ?? ''
+    }
+
+    const match = text.match(/\{[\s\S]*\}/)
+    if (!match) return fallback
+    const parsed = JSON.parse(match[0])
+    return {
+      shouldSearch: Boolean(parsed.shouldSearch),
+      query: (typeof parsed.query === 'string' && parsed.query.trim()
+        ? parsed.query
+        : lastUserMsg
+      ).slice(0, 300)
+    }
+  } catch {
+    return fallback
+  }
+}
+
+// Minimum cosine similarity for a note to be included as context (~65%)
+// Cosine similarity = 1 - d²/2  →  d_max = sqrt(2 * (1 - 0.65)) = sqrt(0.70) ≈ 0.837
+const CONTEXT_DISTANCE_THRESHOLD = 0.837
 
 // --- System prompt ---
 
@@ -40,7 +168,7 @@ Rules:
 
 ${hasContext
       ? `Relevant notes from the user's vault:\n\n${contextNotes}\n\nUse these notes to answer. Highlight connections between them when relevant. If the notes only partially cover the question, say what's missing.`
-      : `No relevant notes found for this query. Answer from general knowledge and mention that the user's vault doesn't cover this topic yet.`
+      : `No relevant notes from the vault for this query. Answer from general knowledge.`
     }`
 }
 
@@ -61,7 +189,6 @@ function buildOpenAIMessages(
 
     if (hasAttachments) {
       const parts: ChatCompletionContentPart[] = []
-      // Text files → prepend to message
       let text = msg.content
       for (const att of params.attachments!) {
         if (att.type === 'text') {
@@ -69,7 +196,6 @@ function buildOpenAIMessages(
         }
       }
       parts.push({ type: 'text', text })
-      // Images → image_url parts
       for (const att of params.attachments!) {
         if (att.type === 'image') {
           parts.push({
@@ -103,7 +229,6 @@ function buildAnthropicMessages(params: StreamChatParams): unknown[] {
           text += `\n\n--- File: ${att.name} ---\n${att.content}`
         }
       }
-      // Images first (Anthropic expects images before text)
       for (const att of params.attachments!) {
         if (att.type === 'image') {
           content.push({
@@ -131,11 +256,12 @@ function buildAnthropicMessages(params: StreamChatParams): unknown[] {
 async function streamChatOpenAI(
   params: StreamChatParams,
   apiKey: string,
+  contextNotes: string,
   baseURL?: string,
   model?: string
 ): Promise<void> {
   const client = new OpenAI({ apiKey, ...(baseURL ? { baseURL } : {}) })
-  const systemPrompt = buildSystemPrompt(params.contextNotes)
+  const systemPrompt = buildSystemPrompt(contextNotes)
 
   const stream = await client.chat.completions.create({
     model: model || 'gpt-4o-mini',
@@ -152,9 +278,10 @@ async function streamChatOpenAI(
 async function streamChatAnthropic(
   params: StreamChatParams,
   apiKey: string,
+  contextNotes: string,
   model?: string
 ): Promise<void> {
-  const systemPrompt = buildSystemPrompt(params.contextNotes)
+  const systemPrompt = buildSystemPrompt(contextNotes)
 
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -218,23 +345,60 @@ export async function streamChat(params: StreamChatParams): Promise<void> {
   const apiKey = getConnectionApiKey(conn.id)
   const model = params.model || conn.model
 
+  // Phase 1: decide whether to search notes
+  let contextNotes = ''
+  try {
+    const intent = await checkSearchIntent(
+      params.messages,
+      conn.provider,
+      apiKey,
+      conn.baseUrl || undefined,
+      model
+    )
+
+    if (intent.shouldSearch) {
+      const results = await searchNotes(intent.query, 15)
+      // Keep only notes above the similarity threshold (sorted by distance asc from LanceDB)
+      const relevant = results.filter((r) => {
+        const d = typeof r._distance === 'number' ? r._distance : 1.414
+        return d <= CONTEXT_DISTANCE_THRESHOLD
+      })
+      if (relevant.length > 0) {
+        const sources: SearchNoteSource[] = relevant.map((r) => ({
+          title: r.title,
+          relativePath: r.relativePath,
+          content: r.content,
+          excerpt: r.content.replace(/^---[\s\S]*?---\n?/, '').trim().slice(0, 200),
+          _distance: typeof r._distance === 'number' ? r._distance : undefined
+        }))
+        params.onSources?.(sources)
+        contextNotes = sources
+          .map((s, i) => `[${i + 1}] ${s.title}\nPath: ${s.relativePath}\n${s.excerpt}`)
+          .join('\n\n---\n\n')
+      }
+    }
+  } catch {
+    // intent check or search failed — stream without context
+  }
+
+  // Phase 2: stream response
   switch (conn.provider) {
     case 'openai':
       if (!apiKey) throw new Error('OpenAI API key is not configured.')
-      return streamChatOpenAI(params, apiKey, conn.baseUrl || undefined, model)
+      return streamChatOpenAI(params, apiKey, contextNotes, conn.baseUrl || undefined, model)
 
     case 'anthropic':
       if (!apiKey) throw new Error('Anthropic API key is not configured.')
-      return streamChatAnthropic(params, apiKey, model)
+      return streamChatAnthropic(params, apiKey, contextNotes, model)
 
     case 'ollama': {
       const base = (conn.baseUrl || 'http://localhost:11434').replace(/\/$/, '')
-      return streamChatOpenAI(params, 'ollama', `${base}/v1`, model)
+      return streamChatOpenAI(params, 'ollama', contextNotes, `${base}/v1`, model)
     }
 
     case 'lmstudio': {
       const base = (conn.baseUrl || 'http://localhost:1234').replace(/\/$/, '')
-      return streamChatOpenAI(params, 'lmstudio', `${base}/v1`, model)
+      return streamChatOpenAI(params, 'lmstudio', contextNotes, `${base}/v1`, model)
     }
 
     default:
