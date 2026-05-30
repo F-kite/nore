@@ -1,8 +1,8 @@
-import { dialog, app } from 'electron'
+import { dialog, app, shell } from 'electron'
 import { readdir, readFile, stat } from 'fs/promises'
 import { join, extname, relative } from 'path'
 import Store from 'electron-store'
-import type { VaultFile, VaultStore } from "../types/vault"
+import type { VaultFile, VaultStore } from '../types/vault'
 
 // Хранилище настроек
 const store = new Store<VaultStore>()
@@ -20,6 +20,36 @@ export async function selectVaultFolder(): Promise<string | null> {
   const vaultPath = result.filePaths[0]
   store.set('vaultPath', vaultPath)
   return vaultPath
+}
+
+// Открыть диалог выбора папки для LanceDB
+export async function selectDbFolder(): Promise<string | null> {
+  const result = await dialog.showOpenDialog({
+    properties: ['openDirectory', 'createDirectory'],
+    title: 'Select folder for vector database',
+    buttonLabel: 'Select Folder'
+  })
+
+  if (result.canceled || result.filePaths.length === 0) return null
+
+  const dbPath = result.filePaths[0]
+  store.set('lanceDbPath', dbPath)
+  return dbPath
+}
+
+// Получить путь по умолчанию для LanceDB
+export function getDefaultDbPath(): string {
+  return join(app.getPath('userData'), 'lancedb')
+}
+
+// Получить сохранённый путь к LanceDB (или default)
+export function getSavedDbPath(): string {
+  return store.get('lanceDbPath') ?? getDefaultDbPath()
+}
+
+// Задать кастомный путь для LanceDB
+export function setDbPath(dbPath: string): void {
+  store.set('lanceDbPath', dbPath)
 }
 
 // Получить сохранённый путь к vault
@@ -42,10 +72,7 @@ async function readMdFiles(dirPath: string, rootPath: string): Promise<VaultFile
       const nested = await readMdFiles(fullPath, rootPath)
       files.push(...nested)
     } else if (entry.isFile() && extname(entry.name) === '.md') {
-      const [fileStat, content] = await Promise.all([
-        stat(fullPath),
-        readFile(fullPath, 'utf-8')
-      ])
+      const [fileStat, content] = await Promise.all([stat(fullPath), readFile(fullPath, 'utf-8')])
 
       files.push({
         name: entry.name.replace('.md', ''),
@@ -64,4 +91,14 @@ async function readMdFiles(dirPath: string, rootPath: string): Promise<VaultFile
 // Загрузить все файлы из vault
 export async function loadVaultFiles(vaultPath: string): Promise<VaultFile[]> {
   return await readMdFiles(vaultPath, vaultPath)
+}
+
+// Открыть заметку в Obsidian через URI scheme
+export async function openInObsidian(notePath: string): Promise<void> {
+  const vaultPath = getSavedVaultPath()
+  if (!vaultPath) throw new Error('No vault configured')
+  const vaultName = vaultPath.split(/[\\/]/).pop() ?? ''
+  const filePath = notePath.replace(/\\/g, '/')
+  const uri = `obsidian://open?vault=${encodeURIComponent(vaultName)}&file=${encodeURIComponent(filePath)}`
+  await shell.openExternal(uri)
 }

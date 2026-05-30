@@ -1,6 +1,5 @@
 import * as lancedb from '@lancedb/lancedb'
-import { app } from 'electron'
-import path from 'path'
+import { getSavedDbPath } from './vault'
 
 export interface NoteRecord {
   id: string
@@ -15,11 +14,19 @@ export interface NoteRecord {
 }
 
 let db: lancedb.Connection | null = null
+let currentDbPath: string | null = null
 
 export async function getDb(): Promise<lancedb.Connection> {
+  const dbPath = getSavedDbPath()
+
+  // Reconnect if path changed
+  if (db && currentDbPath !== dbPath) {
+    db = null
+  }
+
   if (!db) {
-    const dbPath = path.join(app.getPath('userData'), 'lancedb')
     db = await lancedb.connect(dbPath)
+    currentDbPath = dbPath
   }
   return db
 }
