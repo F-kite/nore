@@ -1,4 +1,5 @@
 # IDE
+.claude/*
 .vscode/*
 !.vscode/extensions.json
 

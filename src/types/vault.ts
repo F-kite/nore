@@ -9,4 +9,5 @@ export interface VaultFile {
 
 export interface VaultStore {
   vaultPath: string
+  lanceDbPath: string
 }

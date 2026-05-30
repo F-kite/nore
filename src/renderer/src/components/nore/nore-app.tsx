@@ -1,38 +1,40 @@
-
-import { useState, useEffect, useCallback } from "react"
-import { MessageCircle, PenLine, Settings, Search } from "lucide-react"
-import { ChatScreen } from "./screens/chat-screen"
-import { WriteScreen } from "./screens/write-screen"
-import { SettingsScreen } from "./screens/settings-screen"
-import { SearchModal } from "./search-modal"
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { MessageCircle, PenLine, Settings, Search, Minus, Square, X, AlertTriangle } from 'lucide-react'
+import { ChatScreen } from './screens/chat-screen'
+import { WriteScreen } from './screens/write-screen'
+import { SettingsScreen } from './screens/settings-screen'
+import { WelcomeScreen } from './screens/welcome-screen'
+import { SearchModal, type OpenMode } from './search-modal'
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
-  TooltipTrigger,
-} from "@renderer/components/ui/tooltip"
+  TooltipTrigger
+} from '@renderer/components/ui/tooltip'
 
-export type Screen = "chat" | "write" | "settings"
-export type AccentColor = "blue" | "teal" | "green" | "amber" | "rose" | "violet" | "custom"
-export type FontSize = "compact" | "default" | "comfortable"
+export type Screen = 'chat' | 'write' | 'settings'
+export type AccentColor = 'blue' | 'teal' | 'green' | 'amber' | 'rose' | 'violet' | 'custom'
+export type FontSize = 'compact' | 'default' | 'comfortable'
 
 const accentColors: Record<AccentColor, string> = {
-  blue: "#4C8BF5",
-  teal: "#14B8A6",
-  green: "#22C55E",
-  amber: "#F59E0B",
-  rose: "#F43F5E",
-  violet: "#8B5CF6",
-  custom: "#4C8BF5",
+  blue: '#4C8BF5',
+  teal: '#14B8A6',
+  green: '#22C55E',
+  amber: '#F59E0B',
+  rose: '#F43F5E',
+  violet: '#8B5CF6',
+  custom: '#4C8BF5'
 }
 
 const fontSizes: Record<FontSize, string> = {
-  compact: "13px",
-  default: "14px",
-  comfortable: "16px",
+  compact: '13px',
+  default: '14px',
+  comfortable: '16px'
 }
 
 export interface NoreState {
+  loading: boolean
+  isOnboarded: boolean
   screen: Screen
   searchOpen: boolean
   accentColor: AccentColor
@@ -40,6 +42,7 @@ export interface NoreState {
   fontSize: FontSize
   vaultPath: string
   vaultName: string
+  lanceDbPath: string
   noteCount: number
   tagCount: number
   backlinkCount: number
@@ -47,232 +50,478 @@ export interface NoreState {
   voyageApiKey: string
   llmApiKey: string
   showLineNumbers: boolean
-  indexStatus: "up-to-date" | "indexing" | "error"
+  indexStatus: 'up-to-date' | 'indexing' | 'error'
+  selectedNoteForWrite: { title: string; content: string } | null
+}
+
+/** Map a shortcut key name (e.g. "T", "1", ",") to the expected e.code */
+function keyToCode(key: string): string {
+  if (key.length === 1) {
+    const upper = key.toUpperCase()
+    if (upper >= 'A' && upper <= 'Z') return `Key${upper}`
+    if (upper >= '0' && upper <= '9') return `Digit${upper}`
+  }
+  const special: Record<string, string> = {
+    ',': 'Comma', '.': 'Period', '/': 'Slash', ';': 'Semicolon',
+    "'": 'Quote', '[': 'BracketLeft', ']': 'BracketRight',
+    '\\': 'Backslash', '-': 'Minus', '=': 'Equal', '`': 'Backquote',
+    Escape: 'Escape', Enter: 'Enter', Tab: 'Tab', Space: 'Space',
+    Backspace: 'Backspace', Delete: 'Delete',
+    ArrowUp: 'ArrowUp', ArrowDown: 'ArrowDown',
+    ArrowLeft: 'ArrowLeft', ArrowRight: 'ArrowRight',
+  }
+  return special[key] ?? key
+}
+
+/** Reverse map: e.code → English key name for display/storage */
+export function codeToKey(code: string): string | null {
+  if (code.startsWith('Key')) return code.slice(3) // KeyT → T
+  if (code.startsWith('Digit')) return code.slice(5) // Digit1 → 1
+  const reverse: Record<string, string> = {
+    Comma: ',', Period: '.', Slash: '/', Semicolon: ';',
+    Quote: "'", BracketLeft: '[', BracketRight: ']',
+    Backslash: '\\', Minus: '-', Equal: '=', Backquote: '`',
+    Escape: 'Escape', Enter: 'Enter', Tab: 'Tab', Space: 'Space',
+    Backspace: 'Backspace', Delete: 'Delete',
+    ArrowUp: 'ArrowUp', ArrowDown: 'ArrowDown',
+    ArrowLeft: 'ArrowLeft', ArrowRight: 'ArrowRight',
+  }
+  return reverse[code] ?? null
+}
+
+function matchesShortcut(e: KeyboardEvent, shortcut: string): boolean {
+  const parts = shortcut.split('+')
+  const key = parts[parts.length - 1]
+  const needsMod = parts.includes('CmdOrCtrl')
+  const needsShift = parts.includes('Shift')
+  const needsAlt = parts.includes('Alt')
+
+  if (needsMod && !(e.ctrlKey || e.metaKey)) return false
+  if (!needsMod && (e.ctrlKey || e.metaKey)) return false
+  if (needsShift !== e.shiftKey) return false
+  if (needsAlt !== e.altKey) return false
+  return e.code === keyToCode(key)
 }
 
 export function NoreApp() {
+  const [shortcuts, setShortcuts] = useState<Record<string, string>>({})
+  const newChatRef = useRef<(() => void) | null>(null)
+  const [hasMistralKey, setHasMistralKey] = useState(true)
+  const [hasLlmConnections, setHasLlmConnections] = useState(true)
+
   const [state, setState] = useState<NoreState>({
-    screen: "chat",
+    loading: true,
+    isOnboarded: false,
+    screen: 'chat',
     searchOpen: false,
-    accentColor: "blue",
-    customAccentColor: "#4C8BF5",
-    fontSize: "default",
-    vaultPath: "/Users/alex/Documents/obsidian_storage",
-    vaultName: "obsidian_storage",
-    noteCount: 515,
-    tagCount: 12,
-    backlinkCount: 847,
-    lastIndexed: "2 min ago",
-    voyageApiKey: "voy-xxxxxxxxxxxx",
-    llmApiKey: "sk-xxxxxxxxxxxx",
+    accentColor: 'blue',
+    customAccentColor: '#4C8BF5',
+    fontSize: 'default',
+    vaultPath: '',
+    vaultName: '',
+    lanceDbPath: '',
+    noteCount: 0,
+    tagCount: 0,
+    backlinkCount: 0,
+    lastIndexed: '',
+    voyageApiKey: '',
+    llmApiKey: '',
     showLineNumbers: true,
-    indexStatus: "up-to-date",
+    indexStatus: 'up-to-date',
+    selectedNoteForWrite: null
   })
+
+  // On mount: check if vault is already configured
+  // On mount: check if vault is already configured + listen to indexing progress
+  useEffect(() => {
+    async function init() {
+      try {
+        const savedPath = await window.vault.getSavedPath()
+        if (savedPath) {
+          const files = await window.vault.loadFiles(savedPath)
+          const vaultName = savedPath.split(/[\\/]/).pop() || 'Vault'
+
+          // Check current indexing status
+          const progress = await window.indexing.getProgress()
+
+          setState((s) => ({
+            ...s,
+            loading: false,
+            isOnboarded: true,
+            vaultPath: savedPath,
+            vaultName,
+            noteCount: files.length,
+            indexStatus: progress.status === 'done' ? 'up-to-date'
+              : progress.status === 'indexing' ? 'indexing'
+                : progress.status === 'error' ? 'error'
+                  : 'up-to-date'
+          }))
+          // Check if API keys are configured for returning users
+          Promise.all([
+            window.apiKeys.has('embeddings'),
+            window.llm.getConnections()
+          ]).then(([hasEmb, conns]) => {
+            setHasMistralKey(hasEmb)
+            setHasLlmConnections(conns.length > 0)
+          }).catch(() => {})
+        } else {
+          setState((s) => ({ ...s, loading: false }))
+        }
+      } catch {
+        setState((s) => ({ ...s, loading: false }))
+      }
+    }
+
+    init()
+
+    // Load shortcuts from settings
+    Promise.all([
+      window.settings.get(),
+      window.settings.getDefaultShortcuts()
+    ]).then(([settings, defaults]) => {
+      setShortcuts({ ...defaults, ...settings.shortcuts })
+    }).catch(() => {})
+
+    // Listen to indexing progress updates from main process
+    window.indexing.onProgress((progress) => {
+      setState((s) => ({
+        ...s,
+        indexStatus: progress.status === 'done' ? 'up-to-date'
+          : progress.status === 'indexing' ? 'indexing'
+            : progress.status === 'error' ? 'error'
+              : s.indexStatus,
+        lastIndexed: progress.status === 'done' ? 'Just now' : s.lastIndexed
+      }))
+
+      // When indexing completes, refresh the note count
+      if (progress.status === 'done') {
+        window.vault.getSavedPath().then(async (path) => {
+          if (path) {
+            const files = await window.vault.loadFiles(path)
+            setState((s) => ({ ...s, noteCount: files.length }))
+          }
+        })
+      }
+    })
+  }, [])
+
+  const checkApiKeys = useCallback(async () => {
+    try {
+      const [hasEmb, conns] = await Promise.all([
+        window.apiKeys.has('embeddings'),
+        window.llm.getConnections()
+      ])
+      setHasMistralKey(hasEmb)
+      setHasLlmConnections(conns.length > 0)
+    } catch { /* ignore */ }
+  }, [])
+
+  // Re-check keys whenever the user navigates away from settings (they may have added keys)
+  useEffect(() => {
+    if (state.isOnboarded) checkApiKeys()
+  }, [state.screen, state.isOnboarded, checkApiKeys])
+
+  // Handle onboarding completion
+  const handleOnboardingComplete = useCallback(
+    (config: { vaultPath: string; vaultName: string; lanceDbPath: string; noteCount: number }) => {
+      setState((s) => ({
+        ...s,
+        isOnboarded: true,
+        vaultPath: config.vaultPath,
+        vaultName: config.vaultName,
+        lanceDbPath: config.lanceDbPath,
+        noteCount: config.noteCount,
+        lastIndexed: 'Just now',
+        indexStatus: 'up-to-date'
+      }))
+    },
+    []
+  )
 
   // Apply accent color to CSS variable
   useEffect(() => {
-    const color = state.accentColor === "custom"
-      ? state.customAccentColor
-      : accentColors[state.accentColor]
-    document.documentElement.style.setProperty("--nore-accent", color)
-    document.documentElement.style.setProperty("--nore-accent-muted", `${color}20`)
+    const color =
+      state.accentColor === 'custom' ? state.customAccentColor : accentColors[state.accentColor]
+    document.documentElement.style.setProperty('--nore-accent', color)
+    document.documentElement.style.setProperty('--nore-accent-muted', `${color}20`)
   }, [state.accentColor, state.customAccentColor])
 
   // Apply font size
   useEffect(() => {
-    document.documentElement.style.setProperty("--nore-font-size", fontSizes[state.fontSize])
+    document.documentElement.style.setProperty('--nore-font-size', fontSizes[state.fontSize])
     document.documentElement.style.fontSize = fontSizes[state.fontSize]
   }, [state.fontSize])
 
-  // Keyboard shortcuts
+  // Keyboard shortcuts (dynamic, from settings)
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const isMod = e.metaKey || e.ctrlKey
+    if (!state.isOnboarded) return
 
-      if (isMod && e.key === "k") {
-        e.preventDefault()
-        setState(s => ({ ...s, searchOpen: true }))
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && state.searchOpen) {
+        setState((s) => ({ ...s, searchOpen: false }))
+        return
       }
-      if (isMod && e.key === "1") {
-        e.preventDefault()
-        setState(s => ({ ...s, screen: "chat" }))
+
+      const actions: Record<string, () => void> = {
+        searchNotes: () => setState((s) => ({ ...s, searchOpen: true })),
+        switchChat: () => setState((s) => ({ ...s, screen: 'chat' })),
+        switchWrite: () => setState((s) => ({ ...s, screen: 'write' })),
+        openSettings: () => setState((s) => ({ ...s, screen: 'settings' })),
+        toggleLineNumbers: () => setState((s) => ({ ...s, showLineNumbers: !s.showLineNumbers })),
+        newChat: () => {
+          setState((s) => ({ ...s, screen: 'chat' }))
+          newChatRef.current?.()
+        },
       }
-      if (isMod && e.key === "2") {
-        e.preventDefault()
-        setState(s => ({ ...s, screen: "write" }))
-      }
-      if (isMod && e.key === ",") {
-        e.preventDefault()
-        setState(s => ({ ...s, screen: "settings" }))
-      }
-      if (isMod && e.key === "n") {
-        e.preventDefault()
-        // New chat - handled in ChatScreen
-      }
-      if (isMod && e.shiftKey && e.key === "L") {
-        e.preventDefault()
-        setState(s => ({ ...s, showLineNumbers: !s.showLineNumbers }))
-      }
-      if (e.key === "Escape" && state.searchOpen) {
-        setState(s => ({ ...s, searchOpen: false }))
+
+      for (const [actionId, handler] of Object.entries(actions)) {
+        const shortcut = shortcuts[actionId]
+        if (shortcut && matchesShortcut(e, shortcut)) {
+          e.preventDefault()
+          handler()
+          return
+        }
       }
     }
 
-    window.addEventListener("keydown", handleKeyDown)
-    return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [state.searchOpen])
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [state.isOnboarded, state.searchOpen, shortcuts])
 
   const setScreen = useCallback((screen: Screen) => {
-    setState(s => ({ ...s, screen }))
+    setState((s) => ({ ...s, screen }))
   }, [])
 
   const openSearch = useCallback(() => {
-    setState(s => ({ ...s, searchOpen: true }))
+    setState((s) => ({ ...s, searchOpen: true }))
   }, [])
 
   const closeSearch = useCallback(() => {
-    setState(s => ({ ...s, searchOpen: false }))
+    setState((s) => ({ ...s, searchOpen: false }))
   }, [])
 
   const updateSettings = useCallback((updates: Partial<NoreState>) => {
-    setState(s => ({ ...s, ...updates }))
+    setState((s) => ({ ...s, ...updates }))
   }, [])
 
+  const isMac = window.platform?.isMac ?? false
+
   const navTabs = [
-    { screen: "chat" as Screen, icon: MessageCircle, label: "Chat" },
-    { screen: "write" as Screen, icon: PenLine, label: "Write" },
+    { screen: 'chat' as Screen, icon: MessageCircle, label: 'Chat' },
+    { screen: 'write' as Screen, icon: PenLine, label: 'Write' }
   ]
+
+  // Loading state
+  if (state.loading) {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center bg-nore-base">
+        <div className="flex items-center gap-3">
+          <svg
+            viewBox="0 0 24 24"
+            className="h-6 w-6 animate-pulse"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            style={{ color: 'var(--nore-accent)' }}
+          >
+            <path d="M12 2L2 7l10 5 10-5-10-5z" />
+            <path d="M2 17l10 5 10-5" />
+            <path d="M2 12l10 5 10-5" />
+          </svg>
+          <span className="text-sm text-nore-text-secondary">Loading...</span>
+        </div>
+      </div>
+    )
+  }
+
+  // Welcome/onboarding screen
+  if (!state.isOnboarded) {
+    return <WelcomeScreen onComplete={handleOnboardingComplete} />
+  }
 
   return (
     <TooltipProvider delayDuration={300}>
       <div className="flex h-screen w-screen flex-col overflow-hidden bg-nore-base">
-        {/* Top Bar */}
-        <header className="flex h-12 flex-shrink-0 items-center border-b border-nore-border bg-nore-surface px-4  pl-4 pr-[150px]" style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}>
-          {/* Left: Logo */}
-          <div className="flex items-center gap-2">
-            <div className="flex h-5 w-5 items-center justify-center">
-              <svg
-                viewBox="0 0 24 24"
-                className="h-5 w-5"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                style={{ color: "var(--nore-accent)" }}
-              >
+        {/* Top Bar — draggable window chrome */}
+        <header
+          className="grid h-12 shrink-0 select-none grid-cols-[1fr_auto_1fr] items-center border-b border-nore-border bg-nore-surface"
+          style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+        >
+          {/* Left col: macOS spacer + Logo */}
+          <div className="flex items-center">
+            {isMac && <div className="w-20 shrink-0" />}
+            <div className="flex items-center gap-2 px-4">
+              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: 'var(--nore-accent)' }}>
                 <path d="M12 2L2 7l10 5 10-5-10-5z" />
                 <path d="M2 17l10 5 10-5" />
                 <path d="M2 12l10 5 10-5" />
               </svg>
+              <span className="text-sm font-medium text-nore-text-primary">Nore</span>
             </div>
-            <span className="text-sm font-medium text-nore-text-primary">Nore</span>
           </div>
 
-          {/* Center: Navigation Tabs */}
-          <nav className="absolute left-1/2 flex -translate-x-1/2 items-center gap-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+          {/* Center col: Navigation tabs */}
+          <nav className="flex items-center gap-1">
             {navTabs.map(({ screen, icon: Icon, label }) => {
               const isActive = state.screen === screen
               return (
                 <button
                   key={screen}
                   onClick={() => setScreen(screen)}
-                  className={`relative flex items-center gap-2 px-4 py-3 text-sm transition-colors ${isActive
-                    ? "text-[var(--nore-accent)]"
-                    : "text-nore-text-secondary hover:text-nore-text-primary"
-                    }`}
+                  style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+                  className={`relative flex items-center gap-2 px-4 py-3 text-sm transition-colors cursor-pointer ${
+                    isActive ? 'text-(--nore-accent)' : 'text-nore-text-secondary hover:text-nore-text-primary'
+                  }`}
                 >
                   <Icon className="h-4 w-4" />
                   <span>{label}</span>
                   {isActive && (
-                    <div
-                      className="absolute bottom-0 left-0 right-0 h-0.5 rounded-t-full transition-all"
-                      style={{ backgroundColor: "var(--nore-accent)" }}
-                    />
+                    <div className="absolute bottom-0 left-0 right-0 h-0.5 rounded-t-full bg-(--nore-accent)" />
                   )}
                 </button>
               )
             })}
           </nav>
 
-          {/* Right: Search, Settings, Vault Status */}
-          <div className="ml-auto flex items-center gap-3" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-            {/* Search Button */}
+          {/* Right col: Search + Settings + Vault status + Window controls */}
+          <div className="flex items-center justify-end gap-3 px-4">
             <button
               onClick={openSearch}
-              className="flex items-center gap-2 rounded-md border border-nore-border bg-nore-base px-2.5 py-1.5 text-sm text-nore-text-secondary hover:border-nore-border-hover hover:text-nore-text-primary transition-colors"
+              style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+              className="flex flex-1 min-w-24 max-w-80 items-center gap-2 rounded-md border border-nore-border bg-nore-base cursor-pointer px-2.5 py-1.5 text-sm text-nore-text-secondary transition-colors hover:border-nore-border-hover hover:text-nore-text-primary"
             >
               <Search className="h-3.5 w-3.5" />
               <span>Search</span>
-              <kbd className="ml-1 rounded border border-nore-border bg-nore-surface px-1 py-0.5 text-xs text-nore-text-tertiary">
-                Cmd+K
+              <kbd className="ml-auto rounded border border-nore-border bg-nore-surface px-1 py-0.5 text-xs text-nore-text-tertiary">
+                Ctrl+K
               </kbd>
             </button>
 
-            {/* Settings Button */}
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
-                  onClick={() => setScreen("settings")}
-                  className={`flex h-8 w-8 items-center justify-center rounded-md transition-colors ${state.screen === "settings"
-                    ? "bg-nore-elevated text-[var(--nore-accent)]"
-                    : "text-nore-text-secondary hover:bg-nore-elevated hover:text-nore-text-primary"
-                    }`}
+                  onClick={() => setScreen('settings')}
+                  style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors ${
+                    state.screen === 'settings'
+                      ? 'bg-nore-elevated text-(--nore-accent)'
+                      : 'text-nore-text-secondary hover:bg-nore-elevated hover:text-nore-text-primary'
+                  }`}
                 >
-                  <Settings className="h-4 w-4" />
+                  <Settings className="h-5 w-5" />
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="bottom" className="bg-nore-elevated border-nore-border text-nore-text-primary">
-                <p>Settings <span className="text-nore-text-tertiary ml-2">Cmd+,</span></p>
+              <TooltipContent side="bottom" className="border-nore-border bg-nore-elevated text-nore-text-primary">
+                <p>Settings <span className="ml-2 text-nore-text-tertiary">Ctrl+,</span></p>
               </TooltipContent>
             </Tooltip>
 
-            {/* Vault Status */}
-            <div className="flex items-center gap-2 text-xs text-nore-text-secondary">
-              <div
-                className={`h-2 w-2 rounded-full ${state.indexStatus === "up-to-date"
-                  ? "bg-green-500"
-                  : state.indexStatus === "indexing"
-                    ? "bg-amber-500 animate-pulse"
-                    : "bg-red-500"
-                  }`}
-              />
-              <span>{state.noteCount} notes</span>
-            </div>
+            
+
+            {/* Windows/Linux: custom window controls */}
+            {!isMac && (
+              <div className="-mr-4 flex h-12 shrink-0 items-stretch">
+                <button
+                  onClick={() => window.windowControls.minimize()}
+                  style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+                  className="flex w-11 items-center justify-center text-nore-text-tertiary transition-colors hover:bg-nore-elevated hover:text-nore-text-primary"
+                  title="Minimize"
+                >
+                  <Minus className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  onClick={() => window.windowControls.toggleMaximize()}
+                  style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+                  className="flex w-11 items-center justify-center text-nore-text-tertiary transition-colors hover:bg-nore-elevated hover:text-nore-text-primary"
+                  title="Maximize"
+                >
+                  <Square className="h-3 w-3" />
+                </button>
+                <button
+                  onClick={() => window.windowControls.close()}
+                  style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+                  className="flex w-11 items-center justify-center text-nore-text-tertiary transition-colors hover:bg-red-500 hover:text-white"
+                  title="Close"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
           </div>
         </header>
+
+        {/* API keys setup warning — shown when one or both keys are missing */}
+        {(!hasMistralKey || !hasLlmConnections) && (
+          <div className="flex shrink-0 items-center gap-2.5 border-b border-amber-500/25 bg-amber-500/10 px-4 py-2">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-400" />
+            <p className="flex-1 text-xs text-amber-300">
+              {!hasMistralKey && !hasLlmConnections
+                ? 'Mistral API key and AI model are not configured — search and chat are disabled.'
+                : !hasMistralKey
+                  ? 'Mistral API key is missing — semantic search is disabled.'
+                  : 'No AI model configured — chat is disabled.'}
+            </p>
+            <button
+              onClick={() => setScreen('settings')}
+              style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+              className="shrink-0 rounded px-2 py-0.5 text-xs text-amber-300 underline transition-colors hover:no-underline hover:text-amber-200 cursor-pointer"
+            >
+              Open Settings
+            </button>
+          </div>
+        )}
 
         {/* Main Content */}
         <main className="flex-1 overflow-hidden">
           <div
-            className={`h-full transition-opacity duration-150 ${state.screen === "chat" ? "opacity-100" : "opacity-0 hidden"
+            className={`h-full transition-opacity duration-150 ${state.screen === 'chat' ? 'opacity-100' : 'hidden opacity-0'
               }`}
           >
             <ChatScreen
               noteCount={state.noteCount}
               tagCount={state.tagCount}
               backlinkCount={state.backlinkCount}
+              indexStatus={state.indexStatus}
               lastIndexed={state.lastIndexed}
+              onOpenInWrite={(note) => {
+                setState((s) => ({
+                  ...s,
+                  screen: 'write',
+                  selectedNoteForWrite: { title: note.title, content: note.content }
+                }))
+              }}
+              newChatRef={newChatRef}
             />
           </div>
           <div
-            className={`h-full transition-opacity duration-150 ${state.screen === "write" ? "opacity-100" : "opacity-0 hidden"
+            className={`h-full transition-opacity duration-150 ${state.screen === 'write' ? 'opacity-100' : 'hidden opacity-0'
               }`}
           >
-            <WriteScreen showLineNumbers={state.showLineNumbers} />
+            <WriteScreen
+              showLineNumbers={state.showLineNumbers}
+              initialNote={state.selectedNoteForWrite ?? undefined}
+            />
           </div>
           <div
-            className={`h-full transition-opacity duration-150 ${state.screen === "settings" ? "opacity-100" : "opacity-0 hidden"
+            className={`h-full transition-opacity duration-150 ${state.screen === 'settings' ? 'opacity-100' : 'hidden opacity-0'
               }`}
           >
             <SettingsScreen state={state} onUpdate={updateSettings} />
           </div>
         </main>
 
-        {/* Search Modal */}
         <SearchModal
           open={state.searchOpen}
           onClose={closeSearch}
-          onSelectNote={(note) => {
+          onSelectNote={(note, mode: OpenMode) => {
             closeSearch()
+            setState((s) => ({
+              ...s,
+              screen: mode,
+              selectedNoteForWrite: mode === 'write'
+                ? { title: note.title, content: note.content }
+                : s.selectedNoteForWrite
+            }))
           }}
         />
       </div>
