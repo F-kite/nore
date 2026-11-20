@@ -1,0 +1,104 @@
+@import 'tailwindcss';
+
+@layer base {
+  :root {
+    /* Nore Dark Theme */
+    --nore-base: #0A0A0B;
+    --nore-surface: #111113;
+    --nore-elevated: #1A1A1E;
+
+    --nore-text-primary: #E8E8ED;
+    --nore-text-secondary: #8B8B96;
+    --nore-text-tertiary: #55555E;
+
+    --nore-border: #1E1E24;
+    --nore-border-hover: #2A2A32;
+
+    /* Accent color - customizable at runtime */
+    --nore-accent: #4C8BF5;
+    --nore-accent-muted: #4C8BF520;
+
+    /* Font size - customizable at runtime */
+    --nore-font-size: 14px;
+  }
+
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+    margin: 0;
+  }
+
+  body {
+    min-height: 100vh;
+    background-color: var(--nore-base);
+    color: var(--nore-text-primary);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    font-size: var(--nore-font-size);
+    line-height: 1.5;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow: hidden;
+  }
+
+  #root {
+    height: 100vh;
+    width: 100vw;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #2A2A32;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3A3A42;
+}
+
+/* Hide scrollbar by default, show on hover */
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+.scrollbar-thin:hover {
+  scrollbar-color: #2A2A32 transparent;
+}
+
+/* Animation utilities */
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in-up {
+  animation: fade-in-up 300ms ease-out;
+}
+
+@keyframes shimmer {
+  0% { opacity: 0.5; }
+  50% { opacity: 1; }
+  100% { opacity: 0.5; }
+}
+
+.animate-shimmer {
+  animation: shimmer 1.5s ease-in-out infinite;
+}

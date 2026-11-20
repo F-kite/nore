@@ -1,0 +1,21 @@
+{
+  "extends": "@electron-toolkit/tsconfig/tsconfig.node.json",
+  "include": [
+    "electron.vite.config.*",
+    "src/main/**/*",
+    "src/preload/**/*",
+    "src/main/**/*",
+    "src/renderer/**/*",
+    "src/types/**/*",
+  ],
+  "exclude": [
+    "src/preload/index.d.ts"
+  ],
+  "compilerOptions": {
+    "composite": true,
+    "esModuleInterop": true,
+    "types": [
+      "electron-vite/node"
+    ]
+  }
+}

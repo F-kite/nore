@@ -1,0 +1,104 @@
+import { dialog, app, shell } from 'electron'
+import { readdir, readFile, stat } from 'fs/promises'
+import { join, extname, relative } from 'path'
+import Store from 'electron-store'
+import type { VaultFile, VaultStore } from '../types/vault'
+
+// Хранилище настроек
+const store = new Store<VaultStore>()
+
+// Открыть диалог выбора папки vault
+export async function selectVaultFolder(): Promise<string | null> {
+  const result = await dialog.showOpenDialog({
+    properties: ['openDirectory'],
+    title: 'Select your Obsidian vault folder',
+    buttonLabel: 'Select Vault'
+  })
+
+  if (result.canceled || result.filePaths.length === 0) return null
+
+  const vaultPath = result.filePaths[0]
+  store.set('vaultPath', vaultPath)
+  return vaultPath
+}
+
+// Открыть диалог выбора папки для LanceDB
+export async function selectDbFolder(): Promise<string | null> {
+  const result = await dialog.showOpenDialog({
+    properties: ['openDirectory', 'createDirectory'],
+    title: 'Select folder for vector database',
+    buttonLabel: 'Select Folder'
+  })
+
+  if (result.canceled || result.filePaths.length === 0) return null
+
+  const dbPath = result.filePaths[0]
+  store.set('lanceDbPath', dbPath)
+  return dbPath
+}
+
+// Получить путь по умолчанию для LanceDB
+export function getDefaultDbPath(): string {
+  return join(app.getPath('userData'), 'lancedb')
+}
+
+// Получить сохранённый путь к LanceDB (или default)
+export function getSavedDbPath(): string {
+  return store.get('lanceDbPath') ?? getDefaultDbPath()
+}
+
+// Задать кастомный путь для LanceDB
+export function setDbPath(dbPath: string): void {
+  store.set('lanceDbPath', dbPath)
+}
+
+// Получить сохранённый путь к vault
+export function getSavedVaultPath(): string | null {
+  return store.get('vaultPath') ?? null
+}
+
+// Рекурсивно читать все .md файлы из папки
+async function readMdFiles(dirPath: string, rootPath: string): Promise<VaultFile[]> {
+  const files: VaultFile[] = []
+  const entries = await readdir(dirPath, { withFileTypes: true })
+
+  for (const entry of entries) {
+    // Пропускаем скрытые папки (.obsidian, .git и т.д.)
+    if (entry.name.startsWith('.')) continue
+
+    const fullPath = join(dirPath, entry.name)
+
+    if (entry.isDirectory()) {
+      const nested = await readMdFiles(fullPath, rootPath)
+      files.push(...nested)
+    } else if (entry.isFile() && extname(entry.name) === '.md') {
+      const [fileStat, content] = await Promise.all([stat(fullPath), readFile(fullPath, 'utf-8')])
+
+      files.push({
+        name: entry.name.replace('.md', ''),
+        path: fullPath,
+        relativePath: relative(rootPath, fullPath),
+        content,
+        createdAt: fileStat.birthtimeMs,
+        modifiedAt: fileStat.mtimeMs
+      })
+    }
+  }
+
+  return files
+}
+
+// Загрузить все файлы из vault
+export async function loadVaultFiles(vaultPath: string): Promise<VaultFile[]> {
+  return await readMdFiles(vaultPath, vaultPath)
+}
+
+// Открыть заметку в Obsidian через URI scheme
+export async function openInObsidian(notePath: string): Promise<void> {
+  const vaultPath = getSavedVaultPath()
+  if (!vaultPath) throw new Error('No vault configured')
+  const vaultName = vaultPath.split(/[\\/]/).pop() ?? ''
+  const filePath = notePath.replace(/\\/g, '/')
+  const uri = `obsidian://open?vault=${encodeURIComponent(vaultName)}&file=${encodeURIComponent(filePath)}`
+  await shell.openExternal(uri)
+}
