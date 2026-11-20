@@ -17,8 +17,12 @@ const indexingAPI = {
   start: (vaultPath: string, files: unknown[]) =>
     ipcRenderer.invoke('indexing:start', vaultPath, files),
   getProgress: () => ipcRenderer.invoke('indexing:getProgress'),
-  onProgress: (callback: (progress: unknown) => void) =>
-    ipcRenderer.on('indexing:progress', (_, progress) => callback(progress))
+  onProgress: (callback: (progress: unknown) => void): (() => void) => {
+    const handler = (_: unknown, progress: unknown) => callback(progress)
+    ipcRenderer.on('indexing:progress', handler)
+    return () => ipcRenderer.removeListener('indexing:progress', handler)
+  },
+  cancel: () => ipcRenderer.invoke('indexing:cancel')
 }
 
 // Search API

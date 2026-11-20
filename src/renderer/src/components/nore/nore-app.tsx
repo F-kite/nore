@@ -183,7 +183,7 @@ export function NoreApp() {
     }).catch(() => {})
 
     // Listen to indexing progress updates from main process
-    window.indexing.onProgress((progress) => {
+    const unsubscribeIndexing = window.indexing.onProgress((progress) => {
       setState((s) => ({
         ...s,
         indexStatus: progress.status === 'done' ? 'up-to-date'
@@ -203,6 +203,8 @@ export function NoreApp() {
         })
       }
     })
+
+    return () => unsubscribeIndexing()
   }, [])
 
   const checkApiKeys = useCallback(async () => {
@@ -397,6 +399,39 @@ export function NoreApp() {
               </kbd>
             </button>
 
+            {/* Vault status dot */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => setScreen('settings')}
+                  style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+                  className="flex items-center gap-2 rounded-md px-2 py-1 text-xs text-nore-text-secondary transition-colors hover:bg-nore-elevated hover:text-nore-text-primary cursor-pointer"
+                >
+                  <span
+                    className="h-1.5 w-1.5 shrink-0 rounded-full transition-colors"
+                    style={{
+                      backgroundColor:
+                        state.indexStatus === 'up-to-date' ? '#22C55E'
+                          : state.indexStatus === 'indexing' ? '#F59E0B'
+                            : '#F43F5E'
+                    }}
+                  />
+                  <span className="max-w-28 truncate">{state.vaultName || 'No vault'}</span>
+                  {state.noteCount > 0 && (
+                    <span className="text-nore-text-tertiary">{state.noteCount}</span>
+                  )}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="border-nore-border bg-nore-elevated text-nore-text-primary">
+                <p>
+                  {state.indexStatus === 'up-to-date' ? '✓ Up to date'
+                    : state.indexStatus === 'indexing' ? '⟳ Indexing…'
+                      : '✕ Index error'}
+                  {state.noteCount > 0 && <> · {state.noteCount} notes</>}
+                </p>
+              </TooltipContent>
+            </Tooltip>
+
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
@@ -479,8 +514,6 @@ export function NoreApp() {
           >
             <ChatScreen
               noteCount={state.noteCount}
-              tagCount={state.tagCount}
-              backlinkCount={state.backlinkCount}
               indexStatus={state.indexStatus}
               lastIndexed={state.lastIndexed}
               onOpenInWrite={(note) => {

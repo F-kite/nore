@@ -165,41 +165,12 @@ function noteToRelated(note: NoteRecord): RelatedNote {
   return { title: note.title, path: note.relativePath, excerpt, score }
 }
 
-// --- Toolbar ---
-
-const toolbarButtons = [
-  { icon: Bold, label: "Bold", shortcut: "Cmd+B" },
-  { icon: Italic, label: "Italic", shortcut: "Cmd+I" },
-  { icon: Heading, label: "Heading", shortcut: "Cmd+H" },
-  { icon: LinkIcon, label: "Link", shortcut: "Cmd+K" },
-  { icon: Code, label: "Code", shortcut: "Cmd+`" },
-]
-
-const initialContent = `# Productivity Systems Review
-
-After several months of experimentation, I'm documenting my thoughts on different productivity systems and how they integrate.
-
-## Key Insights
-
-The most important realization is that **no single system works in isolation**. Deep work requires protected time blocks, which needs calendar management. The Zettelkasten method helps with knowledge retention, but only if combined with spaced repetition.
-
-## What's Working
-
-1. Time blocking in 90-minute chunks
-2. Weekly reviews every Sunday
-3. Capturing fleeting notes immediately
-
-## Questions to Explore
-
-- How can I better integrate spaced repetition into my workflow?
-- Should I track habits separately or within my note-taking system?
-`
 
 // --- Main component ---
 
 export function WriteScreen({ showLineNumbers, initialNote }: WriteScreenProps) {
-  const [content, setContent] = useState(initialContent)
-  const [fileName, setFileName] = useState("Productivity Systems Review.md")
+  const [content, setContent] = useState('')
+  const [fileName, setFileName] = useState('Untitled.md')
   const [activeNotePath, setActiveNotePath] = useState("")
 
   useEffect(() => {
@@ -223,6 +194,47 @@ export function WriteScreen({ showLineNumbers, initialNote }: WriteScreenProps) 
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => { contentRef.current = content }, [content])
+
+  // Toolbar actions — wrap/insert markdown at the current cursor/selection
+  const insertMarkdown = useCallback((prefix: string, suffix: string, placeholder: string) => {
+    const el = textareaRef.current
+    if (!el) return
+    const start = el.selectionStart
+    const end = el.selectionEnd
+    const selected = content.slice(start, end)
+    const insertion = selected || placeholder
+    const newContent = content.slice(0, start) + prefix + insertion + suffix + content.slice(end)
+    setContent(newContent)
+    requestAnimationFrame(() => {
+      el.focus()
+      el.setSelectionRange(start + prefix.length, start + prefix.length + insertion.length)
+    })
+  }, [content])
+
+  const insertHeading = useCallback(() => {
+    const el = textareaRef.current
+    if (!el) return
+    const start = el.selectionStart
+    const lineStart = content.lastIndexOf('\n', start - 1) + 1
+    const rest = content.slice(lineStart)
+    if (rest.startsWith('## ')) {
+      const newContent = content.slice(0, lineStart) + rest.slice(3)
+      setContent(newContent)
+      requestAnimationFrame(() => { el.focus(); const p = Math.max(lineStart, start - 3); el.setSelectionRange(p, p) })
+    } else {
+      const newContent = content.slice(0, lineStart) + '## ' + rest
+      setContent(newContent)
+      requestAnimationFrame(() => { el.focus(); el.setSelectionRange(start + 3, start + 3) })
+    }
+  }, [content])
+
+  const toolbarActions = useMemo(() => [
+    { icon: Bold,     label: 'Bold',    shortcut: 'Ctrl+B', onClick: () => insertMarkdown('**', '**', 'bold text') },
+    { icon: Italic,   label: 'Italic',  shortcut: 'Ctrl+I', onClick: () => insertMarkdown('*', '*', 'italic text') },
+    { icon: Heading,  label: 'Heading', shortcut: 'Ctrl+H', onClick: insertHeading },
+    { icon: LinkIcon, label: 'Link',    shortcut: 'Ctrl+K', onClick: () => insertMarkdown('[', '](url)', 'link text') },
+    { icon: Code,     label: 'Code',    shortcut: 'Ctrl+`', onClick: () => insertMarkdown('`', '`', 'code') },
+  ], [insertMarkdown, insertHeading])
 
   // Auto-grow textarea to content height — outer container scrolls, not the textarea
   useEffect(() => {
@@ -332,10 +344,13 @@ export function WriteScreen({ showLineNumbers, initialNote }: WriteScreenProps) 
               />
             </div>
             <div className="flex items-center gap-1">
-              {toolbarButtons.map(({ icon: Icon, label, shortcut }) => (
+              {toolbarActions.map(({ icon: Icon, label, shortcut, onClick }) => (
                 <Tooltip key={label}>
                   <TooltipTrigger asChild>
-                    <button className="flex h-7 w-7 items-center justify-center rounded text-nore-text-secondary hover:bg-nore-elevated hover:text-nore-text-primary transition-colors cursor-pointer hover:text-(--nore-accent)">
+                    <button
+                      onClick={onClick}
+                      className="flex h-7 w-7 items-center justify-center rounded text-nore-text-secondary hover:bg-nore-elevated hover:text-nore-text-primary transition-colors cursor-pointer hover:text-(--nore-accent)"
+                    >
                       <Icon className="h-4 w-4" />
                     </button>
                   </TooltipTrigger>

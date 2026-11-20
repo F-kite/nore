@@ -12,8 +12,14 @@ let currentProgress: IndexingProgress = {
     status: 'idle'
 }
 
+let cancelRequested = false
+
 export function getProgress(): IndexingProgress {
     return { ...currentProgress }
+}
+
+export function cancelIndexing(): void {
+    cancelRequested = true
 }
 
 function escapeSql(value: string): string {
@@ -102,6 +108,7 @@ export async function indexVault(
     files: NoteFile[],
     onProgress: (progress: IndexingProgress) => void
 ): Promise<void> {
+    cancelRequested = false
     currentProgress = { total: files.length, processed: 0, status: 'indexing' }
     onProgress(currentProgress)
 
@@ -142,6 +149,13 @@ export async function indexVault(
         }
 
         for (let i = 0; i < filesToIndex.length; i += BATCH_SIZE) {
+            if (cancelRequested) {
+                cancelRequested = false
+                currentProgress = { ...currentProgress, status: 'idle' }
+                onProgress(currentProgress)
+                return
+            }
+
             const batch = filesToIndex.slice(i, i + BATCH_SIZE)
 
             const batchData = batch.map((f) => {

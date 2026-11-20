@@ -127,7 +127,8 @@ declare global {
     indexing: {
       start: (vaultPath: string, files: VaultFile[]) => Promise<void>
       getProgress: () => Promise<IndexingProgress>
-      onProgress: (callback: (progress: IndexingProgress) => void) => void
+      onProgress: (callback: (progress: IndexingProgress) => void) => () => void
+      cancel: () => Promise<void>
     }
     search: {
       query: (query: string) => Promise<NoteRecord[]>

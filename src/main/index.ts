@@ -20,7 +20,7 @@ import {
   setActiveLlmConnection, getActiveConnection, getConnectionApiKey, getMaskedConnectionApiKey
 } from './settings'
 import type { LLMConnection } from './settings'
-import { indexVault, getProgress, searchNotes } from './indexer'
+import { indexVault, getProgress, searchNotes, cancelIndexing } from './indexer'
 import {
   listConversations,
   loadConversation,
@@ -132,6 +132,10 @@ app.whenReady().then(() => {
 
   ipcMain.handle('indexing:getProgress', () => {
     return getProgress()
+  })
+
+  ipcMain.handle('indexing:cancel', () => {
+    cancelIndexing()
   })
 
   // Search IPC

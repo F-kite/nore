@@ -33,8 +33,6 @@ import type { LLMChatMessage } from '../../../../../types/index.d'
 
 interface ChatScreenProps {
   noteCount: number
-  tagCount: number
-  backlinkCount: number
   indexStatus: 'up-to-date' | 'indexing' | 'error'
   lastIndexed: string
   onOpenInWrite: (note: { title: string; content: string }) => void
@@ -304,8 +302,6 @@ function CopyButton({ text }: { text: string }) {
 
 export function ChatScreen({
   noteCount,
-  tagCount,
-  backlinkCount,
   indexStatus,
   lastIndexed,
   onOpenInWrite,
@@ -966,8 +962,7 @@ export function ChatScreen({
             </div>
             <p className="text-md text-nore-text-secondary">Ask your knowledge base</p>
             <p className="mb-6 text-xs text-nore-text-tertiary">
-              {noteCount} notes indexed &middot; {tagCount} tags &middot; {backlinkCount} backlinks
-              {lastIndexed && <> &middot; Last synced {lastIndexed}</>}
+              {noteCount} notes indexed{lastIndexed && <> &middot; Last synced {lastIndexed}</>}
             </p>
             <div className="flex flex-wrap justify-center gap-3">
               {promptSuggestions.map((suggestion, i) => (

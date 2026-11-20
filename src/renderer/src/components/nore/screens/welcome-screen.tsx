@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Folder, Database, Loader2, Check, ChevronRight, AlertCircle, Eye, EyeOff, Key } from 'lucide-react'
 import type { IndexingProgress } from '../../../../../types/index'
 
@@ -47,6 +47,9 @@ export function WelcomeScreen({ onComplete }: WelcomeScreenProps) {
   // Indexing step
   const [indexingProgress, setIndexingProgress] = useState(0)
   const [indexingStatus, setIndexingStatus] = useState('')
+  const unsubscribeProgressRef = useRef<(() => void) | null>(null)
+
+  useEffect(() => () => { unsubscribeProgressRef.current?.() }, [])
 
   // --- Vault ---
 
@@ -143,7 +146,7 @@ export function WelcomeScreen({ onComplete }: WelcomeScreenProps) {
       setNoteCount(files.length)
       setIndexingStatus(`Indexing ${files.length} notes...`)
 
-      window.indexing.onProgress((progress: IndexingProgress) => {
+      unsubscribeProgressRef.current = window.indexing.onProgress((progress: IndexingProgress) => {
         if (progress.total > 0) {
           const pct = Math.round((progress.processed / progress.total) * 100)
           setIndexingProgress(pct)
